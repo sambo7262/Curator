@@ -8,9 +8,9 @@
   "workflow": {
     "research": true,
     "plan_check": true,
-    "verifier": true,
+    "verifier": false,
     "nyquist_validation": true,
-    "auto_advance": false
+    "auto_advance": true
   },
   "ship": {
     "pr_body_sections": [
@@ -22,7 +22,7 @@
       },
       {
         "heading": "Risks & Dependencies",
-        "enabled": true,
+        "enabled": false,
         "source": "PLAN.md ## Risks || PLAN.md ## Dependencies",
         "fallback": "- No known high-risk rollout dependencies."
       },
