@@ -1,0 +1,11 @@
+[project]
+name = "curator"
+version = "0.1.0-phase1"
+description = "Autonomous, fallback-only Soulseek/slskd gap-filler for Lidarr/Readarr on a Synology homelab"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+# Tests import `main` directly (mirrors the image layout where app/ is WORKDIR).
+pythonpath = ["app"]
+testpaths = ["app/tests"]
+addopts = "-q"

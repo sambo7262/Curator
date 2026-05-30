@@ -1,0 +1,85 @@
+# Curator Phase-1 stack — gluetun (PIA/OpenVPN) + slskd (shared netns) + curator (synobridge).
+# Deploy on the Synology via Container Manager. Pin @sha256 digests before prod (see NAS-RECON.md).
+# Owner environment: synobridge=172.20.0.0/16, PUID/PGID=1031/65536, /volume1/data, PIA=CA Vancouver.
+services:
+  # ─────────────────────────────── VPN tunnel (PIA via OpenVPN) ───────────────────────────────
+  gluetun:
+    image: qmcgaw/gluetun:v3.41.1        # pin @sha256 once captured on the NAS
+    container_name: gluetun
+    cap_add: [NET_ADMIN]
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    networks: [synobridge]               # gluetun joins synobridge (INFRA-03)
+    ports:
+      - "5030:5030"                      # publish slskd's web/API onto synobridge (slskd has no net stack)
+    environment:
+      # --- PIA / VPN via OpenVPN (INFRA-01) ---
+      VPN_SERVICE_PROVIDER: "private internet access"
+      VPN_TYPE: "openvpn"                # OpenVPN = gluetun's native PIA path w/ seamless PF (NOT wireguard)
+      OPENVPN_USER: "${PIA_USER}"
+      OPENVPN_PASSWORD: "${PIA_PASSWORD}"
+      SERVER_REGIONS: "${PIA_PF_REGION}" # CA Vancouver — PF-capable, west-coast (US has NO port forwarding)
+      # --- Port forwarding (INFRA-02) ---
+      VPN_PORT_FORWARDING: "on"
+      VPN_PORT_FORWARDING_PROVIDER: "private internet access"
+      # --- Kill-switch LAN allowance (INFRA-03): synobridge subnet; must NOT overlap the VPN CIDR ---
+      FIREWALL_OUTBOUND_SUBNETS: "${SYNOBRIDGE_CIDR}"   # 172.20.0.0/16
+      # --- Control-server auth (gluetun v3.40+ REQUIRES this, else slskd PF poll 401s silently) ---
+      GLUETUN_HTTP_CONTROL_SERVER_ENABLE: "on"
+      HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE: '{"auth":"apikey","apikey":"${GLUETUN_API_KEY}"}'
+      TZ: "${TZ}"
+    volumes:
+      - /volume1/docker/gluetun:/gluetun  # persist forwarded port (60-day) + auth (survives reboot)
+    restart: unless-stopped
+    # gluetun ships a built-in healthcheck (used by slskd's depends_on). Runs its tunnel as root by design.
+
+  # ─────────────────────────────── Soulseek daemon ───────────────────────────────
+  slskd:
+    image: slskd/slskd:0.25.1            # pin @sha256 once captured on the NAS; >=0.24.4 needed for native PF
+    container_name: slskd
+    network_mode: "service:gluetun"      # share VPN netns — NO ports/networks here (they live on gluetun)
+    user: "${PUID}:${PGID}"              # slskd uses the `user:` directive, NOT PUID/PGID env vars
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      # --- native gluetun PF sync (INFRA-02): slskd self-applies PIA's forwarded port as its listen port ---
+      SLSKD_VPN: "true"
+      SLSKD_VPN_PORT_FORWARDING: "true"
+      SLSKD_VPN_GLUETUN_URL: "http://localhost:8000"   # control server is in the SAME netns → localhost
+      SLSKD_VPN_GLUETUN_API_KEY: "${GLUETUN_API_KEY}"  # MUST equal gluetun's apikey (else 401)
+      SLSKD_API_KEY: "${SLSKD_API_KEY}"   # slskd's own API key (Curator uses it from Phase 2)
+      SLSKD_UMASK: "002"                  # group-writable so the *arr (same GID) can import
+      # Do NOT set SLSKD_SLSK_LISTEN_PORT — native PF sets the Soulseek port dynamically.
+      TZ: "${TZ}"
+    volumes:
+      - /volume1/docker/slskd:/app        # slskd config/state
+      - /volume1/data:/data               # SAME identical path everywhere (INFRA-06, atomic hardlinks)
+    restart: unless-stopped
+
+  # ─────────────────────────────── Curator app stub ───────────────────────────────
+  curator:
+    image: ${DOCKERHUB_USER}/curator:latest   # built by CI (INFRA-05); pin a sha tag for reproducible prod
+    container_name: curator
+    networks: [synobridge]               # plain synobridge member — reaches slskd via gluetun:5030
+    depends_on: [gluetun]
+    environment:
+      SLSKD_URL: "http://gluetun:5030"     # slskd via gluetun's published port — NEVER http://slskd
+      SLSKD_API_KEY: "${SLSKD_API_KEY}"
+      GLUETUN_CONTROL_URL: "http://gluetun:8000"   # health display only (Phase 1: optional)
+      GLUETUN_API_KEY: "${GLUETUN_API_KEY}"
+      LIDARR_URL: "http://lidarr:8686"
+      LIDARR_API_KEY: "${LIDARR_API_KEY}"
+      READARR_URL: "http://readarr:8787"   # books adapter lands in Phase 2/3; wired here for reachability
+      READARR_API_KEY: "${READARR_API_KEY}"
+      TZ: "${TZ}"
+    ports:
+      - "8674:8674"                        # Curator status/health endpoint (LAN/Tailscale only — never WAN)
+    volumes:
+      - /volume1/docker/curator/config:/config
+      - /volume1/data:/data:ro             # Phase-1 stub only proves it can READ /data (read-only)
+    restart: unless-stopped
+
+networks:
+  synobridge:
+    external: true                         # already created by the existing media stack
