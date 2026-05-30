@@ -4,11 +4,11 @@
 
 ## Current Status
 
-**Phase**: 2 - State Ledger + *arr Adapter + Gap Detection — ✎ PLANNED (ready to execute)
-**Plan**: 0 of 4 complete (4 plans in 3 waves)
-**Status**: Phase 2 planned — research + pattern map + 4 PLAN.md + VALIDATION.md done; plan-checker returned 0 blockers (4 doc-alignment warnings, 2 fixed / 2 accepted). All 6 reqs (STATE-01/02, ARR-01/02, GAP-01/02) covered; all 4 success criteria mapped to offline fixture-based tests. Phase 1 remains ✓ COMPLETE (deployed & verified on NAS — slskd logged into Soulseek via PIA Vancouver, port 56034).
-**Last action**: Planned Phase 2. Wave 1: 02-01 (offline fixtures + conftest + config + /db mount; blocking package-legitimacy checkpoint). Wave 2 ∥: 02-02 (SQLite-WAL ledger, status-preserving dedup upsert) + 02-03 (ArrAdapter Protocol + Lidarr/defensive-Readarr + breaker). Wave 3: 02-04 (gap_detector wiring + end-to-end dedup/Readarr-degradation proofs + one-shot trigger). Also captured a Phase 3 research seed (beets distance model + 1σ-threshold matching philosophy).
-**Next action**: `/clear` then run `/gsd:execute-phase 2`. NOTE for execute-phase: behavioral pytest verifies are non-fatal locally (Python-3.9 + offline sandbox) — the real green/red gate is `pytest app/tests -q` on Python 3.12 at CI/NAS; run it before marking the phase verified (plan-check warning #2).
+**Phase**: 2 - State Ledger + *arr Adapter + Gap Detection — ⚙ IN PROGRESS
+**Plan**: 1 of 4 complete (4 plans in 3 waves)
+**Status**: 02-01 ✓ COMPLETE — Wave 0 offline test substrate landed: 6 recorded *arr JSON fixtures + conftest (tmp_db_path/load_fixture/offline httpx-mock), config.py (frozen Settings + DB_PATH), 3 package markers, and the dedicated /db mount + DB_PATH wired into compose/.env.example. Blocking package-legitimacy checkpoint RESOLVED — httpx==0.28.1 + respx==0.22.0 human-approved as pinned. Phase 1 remains ✓ COMPLETE (deployed & verified on NAS — slskd logged into Soulseek via PIA Vancouver, port 56034).
+**Last action**: Executed + finalized 02-01 (continuation after checkpoint approval). Local verify = AST-parse + grep (all task `<automated>` blocks pass); behavioral pytest deferred to CI/NAS Python 3.12.
+**Next action**: Execute Wave 2 (parallel): 02-02 (SQLite-WAL ledger, status-preserving dedup upsert, startup hook) + 02-03 (ArrAdapter Protocol + Lidarr/defensive-Readarr + breaker). Then Wave 3: 02-04 (gap_detector wiring + end-to-end dedup/Readarr-degradation proofs + one-shot trigger). NOTE: behavioral pytest verifies are non-fatal locally (Python-3.9 + offline sandbox) — the real green/red gate is `pytest app/tests -q` on Python 3.12 at CI/NAS; run it before marking the phase verified.
 
 ## Active Phase Detail
 

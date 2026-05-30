@@ -43,7 +43,7 @@ the music path. Music must work end-to-end before the books adapter is layered i
 
 ### Persistent State & Dedup
 
-- [ ] **STATE-01**: Curator persists each tracked item's lifecycle status (pending/searching/grabbed/downloaded/imported/unavailable/blacklisted) in SQLite (WAL) — the spine, built before the source engine
+- [~] **STATE-01**: Curator persists each tracked item's lifecycle status (pending/searching/grabbed/downloaded/imported/unavailable/blacklisted) in SQLite (WAL) — the spine, built before the source engine *(02-01 done: DB_PATH config seam + dedicated /db mount foundation; SQLite-WAL ledger persistence lands in 02-02)*
 - [ ] **STATE-02**: Curator never re-downloads an item that is already satisfied or in-flight (dedup keyed on stable `*arr` identity)
 - [ ] **STATE-03**: Curator applies exponential backoff to retries and permanently remembers genuinely-unavailable items (long-TTL dormant re-check) so it stops retrying them
 
@@ -117,7 +117,7 @@ Which phases cover which requirements.
 | INFRA-04 | Phase 1 | Pending |
 | INFRA-05 | Phase 1 | Pending |
 | INFRA-06 | Phase 1 | Pending |
-| STATE-01 | Phase 2 | Pending |
+| STATE-01 | Phase 2 | In progress (02-01 foundation done; ledger in 02-02) |
 | STATE-02 | Phase 2 | Pending |
 | ARR-01 | Phase 2 | Pending |
 | ARR-02 | Phase 2 | Pending |
