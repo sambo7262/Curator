@@ -5,10 +5,10 @@
 ## Current Status
 
 **Phase**: 2 - State Ledger + *arr Adapter + Gap Detection — ⚙ IN PROGRESS
-**Plan**: 1 of 4 complete (4 plans in 3 waves)
-**Status**: 02-01 ✓ COMPLETE — Wave 0 offline test substrate landed: 6 recorded *arr JSON fixtures + conftest (tmp_db_path/load_fixture/offline httpx-mock), config.py (frozen Settings + DB_PATH), 3 package markers, and the dedicated /db mount + DB_PATH wired into compose/.env.example. Blocking package-legitimacy checkpoint RESOLVED — httpx==0.28.1 + respx==0.22.0 human-approved as pinned. Phase 1 remains ✓ COMPLETE (deployed & verified on NAS — slskd logged into Soulseek via PIA Vancouver, port 56034).
-**Last action**: Executed + finalized 02-01 (continuation after checkpoint approval). Local verify = AST-parse + grep (all task `<automated>` blocks pass); behavioral pytest deferred to CI/NAS Python 3.12.
-**Next action**: Execute Wave 2 (parallel): 02-02 (SQLite-WAL ledger, status-preserving dedup upsert, startup hook) + 02-03 (ArrAdapter Protocol + Lidarr/defensive-Readarr + breaker). Then Wave 3: 02-04 (gap_detector wiring + end-to-end dedup/Readarr-degradation proofs + one-shot trigger). NOTE: behavioral pytest verifies are non-fatal locally (Python-3.9 + offline sandbox) — the real green/red gate is `pytest app/tests -q` on Python 3.12 at CI/NAS; run it before marking the phase verified.
+**Plan**: 2 of 4 complete (4 plans in 3 waves)
+**Status**: 02-02 ✓ COMPLETE — the SQLite-WAL ledger (the persistent spine) landed: schema.sql (single `items` table, UNIQUE(arr_app, arr_id) dedup, 7-value status CHECK enum, foreign_id Phase-3 anchor, two indexes), db.py (WAL connect + idempotent PRAGMA user_version migration runner), repo.py (status-preserving ON CONFLICT upsert + get_gap/set_status/list_by_status), a FastAPI startup migration hook in main.py, and 5 offline pytest proofs (restart-durability, enum CHECK, dedup, status-preservation, idempotent migrations). The load-bearing STATE-02 rule is proven: a re-detect upsert never clobbers an acted-on row's status. STATE-01 + STATE-02 complete. 02-01 remains ✓ COMPLETE (Wave 0 test substrate + config + /db mount). Phase 1 remains ✓ COMPLETE (deployed & verified on NAS — slskd logged into Soulseek via PIA Vancouver, port 56034).
+**Last action**: Executed + finalized 02-02 (3 atomic feat commits: 2169575 db+schema, e7a81b0 repo, c7cc311 startup-hook+tests). Local verify = AST-parse + grep + behavioral sqlite3 run; all 5 named pytest proofs pass locally on Python 3.9 (stdlib sqlite3 only, no new deps) — full suite 8 passed.
+**Next action**: Execute the rest of Wave 2: 02-03 (ArrAdapter Protocol + GapItem, LidarrAdapter missing+cutoff, defensive ReadarrAdapter + circuit breaker). Then Wave 3: 02-04 (gap_detector wiring detect_gaps adapters→ledger + end-to-end dedup/Readarr-degradation proofs + one-shot trigger). NOTE: behavioral pytest verifies are non-fatal locally (Python-3.9 + offline sandbox) — the real green/red gate is `pytest app/tests -q` on Python 3.12 at CI/NAS; run it before marking the phase verified.
 
 ## Active Phase Detail
 
@@ -20,6 +20,8 @@ Phase 1 delivers the substrate: gluetun (PIA/OpenVPN, kill-switch, port forwardi
 - **Inline execution** of Phase 1 (not worktree subagents) — all owner-provided values were in context and 01-02/01-04 share docker-compose.yml; faster and conflict-free.
 - **Owner deploys manually** in Container Manager (not auto-SSH) — DEPLOY.md is the handoff.
 - **slskd-direct, not Soularr**; **v1 = music + books (Readarr best-effort)**; **staging→Manual-Import→auto-purge** cleanup (the 6th pain point).
+- **Status-preserving upsert (02-02)** — the `ON CONFLICT(arr_app, arr_id)` SET clause omits BOTH `status` and `discovered_at`, so a re-detect of an acted-on/first-seen row never clobbers its lifecycle status (the #1 STATE-02 pitfall, proven by `test_upsert_preserves_status`).
+- **WAL + PRAGMA user_version migrations (02-02)** — idempotent versioned runner reading schema.sql relative to db.py; the only f-string-into-SQL is the loop-controlled `user_version` bump; all data queries use `?` placeholders.
 
 ## Project Reference
 

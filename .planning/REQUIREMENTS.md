@@ -43,8 +43,8 @@ the music path. Music must work end-to-end before the books adapter is layered i
 
 ### Persistent State & Dedup
 
-- [~] **STATE-01**: Curator persists each tracked item's lifecycle status (pending/searching/grabbed/downloaded/imported/unavailable/blacklisted) in SQLite (WAL) — the spine, built before the source engine *(02-01 done: DB_PATH config seam + dedicated /db mount foundation; SQLite-WAL ledger persistence lands in 02-02)*
-- [ ] **STATE-02**: Curator never re-downloads an item that is already satisfied or in-flight (dedup keyed on stable `*arr` identity)
+- [x] **STATE-01**: Curator persists each tracked item's lifecycle status (pending/searching/grabbed/downloaded/imported/unavailable/blacklisted) in SQLite (WAL) — the spine, built before the source engine *(02-02: items table with the 7-value status CHECK enum + WAL durability + startup migration hook; restart-durability proven by `test_persists_across_reconnect`)*
+- [x] **STATE-02**: Curator never re-downloads an item that is already satisfied or in-flight (dedup keyed on stable `*arr` identity) *(02-02: UNIQUE(arr_app, arr_id) + status-preserving ON CONFLICT upsert; dedup + no-status-clobber proven by `test_dedup_no_duplicate` + `test_upsert_preserves_status`)*
 - [ ] **STATE-03**: Curator applies exponential backoff to retries and permanently remembers genuinely-unavailable items (long-TTL dormant re-check) so it stops retrying them
 
 ### Acquisition
@@ -117,8 +117,8 @@ Which phases cover which requirements.
 | INFRA-04 | Phase 1 | Pending |
 | INFRA-05 | Phase 1 | Pending |
 | INFRA-06 | Phase 1 | Pending |
-| STATE-01 | Phase 2 | In progress (02-01 foundation done; ledger in 02-02) |
-| STATE-02 | Phase 2 | Pending |
+| STATE-01 | Phase 2 | Complete (02-02 SQLite-WAL ledger + restart-durability) |
+| STATE-02 | Phase 2 | Complete (02-02 dedup UNIQUE + status-preserving upsert) |
 | ARR-01 | Phase 2 | Pending |
 | ARR-02 | Phase 2 | Pending |
 | GAP-01 | Phase 2 | Pending |
