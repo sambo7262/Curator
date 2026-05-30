@@ -92,7 +92,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. VPN-Routed Networking Foundation | 0/4 | Planned | - |
+| 1. VPN-Routed Networking Foundation | 4/4 | Code complete (NAS deploy pending) | 2026-05-30 |
 | 2. State Ledger + *arr Adapter + Gap Detection | 0/0 | Not started | - |
 | 3. Matching & Quality Gating | 0/0 | Not started | - |
 | 4. Acquisition, Staging & Clean Import | 0/0 | Not started | - |
