@@ -93,6 +93,34 @@ def test_missing_api_key_fails_fast(httpx_client):
             LidarrAdapter("http://test-arr", bad, httpx_client({}))
 
 
+def test_missing_id_record_is_skipped_not_fatal(caplog):
+    """WR-03: a record missing `id` must be skipped+logged, not KeyError-abort the primary run.
+    One good + one bad record on the missing route -> one GapItem, no exception."""
+    import logging
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/wanted/missing"):
+            return httpx.Response(200, json={
+                "page": 1, "pageSize": 100, "totalRecords": 2,
+                "records": [
+                    {"id": 1, "title": "Good", "foreignAlbumId": "m1",
+                     "profileId": 1, "artist": {"artistName": "X"}},
+                    {"title": "No id here", "foreignAlbumId": "m2"},   # malformed: missing id
+                ],
+            })
+        return httpx.Response(200, json={"page": 1, "pageSize": 100, "totalRecords": 0, "records": []})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    adapter = LidarrAdapter("http://test-arr", "k", client)
+
+    with caplog.at_level(logging.WARNING):
+        gaps = adapter.get_wanted()   # must NOT raise KeyError
+
+    assert [g.arr_id for g in gaps] == ["1"]   # only the well-formed record survives
+    assert any("missing id" in r.message.lower() or "skipping" in r.message.lower()
+               for r in caplog.records)
+
+
 def test_lidarr_satisfies_protocol(httpx_client):
     """ARR-01: a LidarrAdapter exposes the Phase-2 ArrAdapter surface (app + callable get_wanted).
 

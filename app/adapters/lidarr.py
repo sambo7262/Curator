@@ -6,9 +6,13 @@
 # Lidarr is the primary path, so a hard fault is allowed to surface (raise_for_status) — it is
 # deliberately NOT breaker-wrapped (unlike Readarr). The injected httpx.Client makes it testable
 # offline with httpx.MockTransport / respx (RESEARCH "Environment Availability").
+import logging
+
 import httpx
 
 from adapters.base import GapItem
+
+log = logging.getLogger(__name__)
 
 
 class LidarrAdapter:
@@ -71,13 +75,26 @@ class LidarrAdapter:
         return records
 
     def get_wanted(self) -> list:
-        """Monitored missing (gap_type='missing') + cutoff-unmet (gap_type='cutoff') merged."""
-        missing = [self._map(rec, "missing") for rec in self._paged("wanted/missing")]
-        cutoff = [self._map(rec, "cutoff") for rec in self._paged("wanted/cutoff")]
-        return missing + cutoff
+        """Monitored missing (gap_type='missing') + cutoff-unmet (gap_type='cutoff') merged.
 
-    def _map(self, rec: dict, gap_type: str) -> GapItem:
+        A single malformed record (missing `id`) is skipped+logged rather than aborting the
+        whole primary run (WR-03); _map returns None for such records and they are filtered here.
+        """
+        out = []
+        for gap_type in ("missing", "cutoff"):
+            for rec in self._paged(f"wanted/{gap_type}"):
+                mapped = self._map(rec, gap_type)
+                if mapped is not None:
+                    out.append(mapped)
+        return out
+
+    def _map(self, rec: dict, gap_type: str):
         # [VERIFIED AlbumResource fields: id, foreignAlbumId, artistId, title, monitored, profileId]
+        # Defensive: a record without `id` has no stable dedup identity — skip it (mirrors Readarr,
+        # WR-03) so one bad record cannot KeyError-abort the entire primary detection pass.
+        if not isinstance(rec, dict) or rec.get("id") is None:
+            log.warning("lidarr record not a dict or missing id; skipping: %r", rec)
+            return None
         artist = rec.get("artist") or {}
         return GapItem(
             arr_app="lidarr",
