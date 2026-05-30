@@ -47,25 +47,34 @@ hdr "Criterion 3: reachability + CI + no baked secrets"
 # 3a. slskd API reachable from synobridge via gluetun's published port
 CODE=$(docker run --rm --network synobridge curlimages/curl -s -o /dev/null -w "%{http_code}" http://gluetun:5030/ 2>/dev/null)
 case "$CODE" in 200|302|401) pass "slskd API alive via gluetun:5030 (HTTP $CODE)";; *) fail "slskd API not reachable via gluetun:5030 (HTTP ${CODE:-?})";; esac
-# 3b. Curator -> Lidarr by container name (INFRA-03)
-LCODE=$(docker exec curator sh -c 'curl -s -o /dev/null -w "%{http_code}" -H "X-Api-Key: $LIDARR_API_KEY" http://lidarr:8686/api/v1/system/status' 2>/dev/null)
-[ "$LCODE" = "200" ] && pass "Curator -> lidarr:8686 = 200" || fail "Curator -> lidarr returned ${LCODE:-?} (FIREWALL_OUTBOUND_SUBNETS / name resolution)"
-# 3c. Curator -> slskd via gluetun
-CCODE=$(docker exec curator sh -c 'curl -s -o /dev/null -w "%{http_code}" http://gluetun:5030/' 2>/dev/null)
-case "$CCODE" in 200|302|401) pass "Curator -> gluetun:5030 alive (HTTP $CCODE)";; *) fail "Curator -> gluetun:5030 unreachable (${CCODE:-?})";; esac
+# 3b. *arr reachable by container name over synobridge (INFRA-03).
+#     NOTE: the curator image is python:3.12-slim and has NO curl — prove the synobridge path
+#     with a curl sidecar on the same network (equivalent: curator is a plain synobridge member).
+LCODE=$(docker run --rm --network synobridge curlimages/curl -s -o /dev/null -w "%{http_code}" -H "X-Api-Key: ${LIDARR_API_KEY}" http://lidarr:8686/api/v1/system/status 2>/dev/null)
+[ "$LCODE" = "200" ] && pass "lidarr:8686 reachable on synobridge = 200" || fail "lidarr returned ${LCODE:-?} (FIREWALL_OUTBOUND_SUBNETS / name resolution)"
+# 3c. Curator process itself is alive + reachable on synobridge (also catches a crash-loop)
+RCODE=$(docker run --rm --network synobridge curlimages/curl -s -o /dev/null -w "%{http_code}" http://curator:8674/healthz 2>/dev/null)
+[ "$RCODE" = "200" ] && pass "curator:8674 /healthz = 200 (curator stable on synobridge)" || fail "curator:8674 /healthz ${RCODE:-?} (curator not stable? check: docker logs curator)"
 # 3d. CI reminder
 echo "  NOTE: confirm GitHub Actions is green and ${DOCKERHUB_USER}/curator pushed to Docker Hub (3d)."
 # 3e. No baked secrets in the image
 if docker history --no-trunc "${DOCKERHUB_USER}/curator:latest" 2>/dev/null | grep -iE 'PIA_|API_KEY|PASSWORD' >/dev/null; then fail "baked secrets found in image layers"; else pass "no baked secrets in image"; fi
 
 hdr "Criterion 4: single compose + /data + ownership + hardlink"
-# 4a. stack up
-docker compose up -d >/dev/null 2>&1 && sleep 10
+# 4a. stack up — WAIT for gluetun healthy + curator answering before asserting (avoid restart race)
+docker compose up -d >/dev/null 2>&1
+for _ in $(seq 1 30); do
+  H=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' gluetun 2>/dev/null)
+  C=$(docker run --rm --network synobridge curlimages/curl -s -o /dev/null -w "%{http_code}" http://curator:8674/healthz 2>/dev/null)
+  { [ "$H" = "healthy" ] || [ "$H" = "none" ]; } && [ "$C" = "200" ] && break
+  sleep 5
+done
 docker compose ps
-# 4b. Curator can read /data
-READY=$(docker exec curator sh -c 'curl -s localhost:8674/readyz' 2>/dev/null)
+# 4b. Curator can read /data (synobridge sidecar — no curl in the slim curator image)
+READY=$(docker run --rm --network synobridge curlimages/curl -s http://curator:8674/readyz 2>/dev/null)
 if echo "$READY" | grep -q '"data_mount_present":true' && echo "$READY" | grep -q '"data_readable":true'; then pass "Curator /readyz: /data present + readable"; else fail "Curator /readyz did not confirm /data: $READY"; fi
-# 4c. ownership matches media user
+# 4c. ownership matches media user (wait for slskd to be running first)
+for _ in $(seq 1 24); do [ "$(docker inspect -f '{{.State.Running}}' slskd 2>/dev/null)" = "true" ] && break; sleep 5; done
 docker exec slskd sh -c 'ls -ld /data && id' 2>/dev/null || true
 # 4d. hardlink across /data
 HL=$(docker exec slskd sh -c '
