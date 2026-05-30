@@ -1,163 +1,224 @@
-# Feature Landscape
+# Feature Research
 
-**Domain:** Autonomous, fallback-only Soulseek (slskd) gap-filler for Lidarr/Readarr — hands-off acquisition of music/books the Usenet pipeline can't get.
+**Domain:** Autonomous, fallback-only P2P (Soulseek/slskd) gap-filler for Lidarr (music) + Readarr (books), fully hands-off
 **Researched:** 2026-05-29
-**Overall confidence:** MEDIUM (see note)
+**Confidence:** MEDIUM-HIGH (behavior verified against Soularr/r:soul/slskd source & issue trackers; exact *arr API payloads flagged needs-validation)
 
-> **Research environment note:** External network (WebSearch/WebFetch/curl) was unavailable in this sandbox; all tool calls returned empty. Findings below are drawn from domain knowledge of the *arr ecosystem, slskd, Soularr, and the Soulseek protocol (training cutoff Jan 2026). Items that are **version-sensitive or fast-moving are explicitly flagged for verification** before requirements lock. The single most important verify-first item is the **Readarr deprecation status** (see Pitfall callout under "Books").
+This domain has one widely-used reference implementation — **Soularr** (`mrusse/soularr`, Lidarr↔slskd bridge) — plus its Readarr fork **r:soul** (`insanemal/rsoul`), the **slskd** daemon (Soulseek client with REST API), and the **\*arr** family. "Differentiator" here means *better than running raw Soularr on a cron*, because Soularr is exactly what the owner already tried and abandoned. **Every prior pain point traces to a documented Soularr weakness**, so the literature directly maps onto requirements.
 
----
+**Prior pain points (referenced as PP#):**
+- **PP1** Redundant downloads — *confirmed Soularr bug: it keeps re-matching and re-downloading the same album, filling `failed_imports/` repeatedly* ([soularr #164](https://github.com/mrusse/soularr/issues/164), [#179](https://github.com/mrusse/soularr/discussions/179))
+- **PP2** Wrong matches — *Soularr's loose filename-ratio matching (default 0.5) grabs wrong editions; fails when Lidarr monitors a specific edition uncommon on Soulseek* ([soularr #164](https://github.com/mrusse/soularr/issues/164), [#68](https://github.com/mrusse/soularr/issues/68))
+- **PP3** Quality downgrades — *Soularr quality prioritization is weak; users request better ranking* ([soularr #161](https://github.com/mrusse/soularr/issues/161))
+- **PP4** Complex supplementary config — many fragile knobs (match ratio, formats, countries, interval) in `config.ini`
+- **PP5** Import/sync friction — *partial imports leave the album still "wanted," so it re-downloads forever; Lidarr import threshold rejects "reasonable" matches* ([soularr #68](https://github.com/mrusse/soularr/issues/68), [#164](https://github.com/mrusse/soularr/issues/164))
 
-## Critical Cross-Cutting Finding: Readarr Is Retired — VERIFY FIRST
-
-**[CONFIDENCE: MEDIUM — VERIFY BEFORE ROADMAP LOCK]** As of early 2025 the Servarr team announced Readarr is **no longer actively developed / archived**, primarily due to book metadata source instability. This directly threatens the "books" half of Curator.
-
-Implications you must resolve before building:
-- The Readarr API may still function against an existing instance, but **metadata refresh / search for new editions may be unreliable or broken**.
-- Community forks exist (e.g. attempts to replace the metadata server). Their API compatibility varies.
-- **Recommendation:** Treat **music (Lidarr) as the primary, must-work target** and **books (Readarr) as a secondary, best-effort target gated behind a feature flag.** Design the gap-detection and import-handoff layers as *-arr-agnostic adapters so a Readarr replacement can be swapped in. Do NOT let book-specific brokenness block the music path from shipping.
-
-This reframes MVP: **ship music end-to-end first; books second.**
+**The single root cause behind PP1 + PP5:** Soularr keeps **no persistent attempt-state**. An item that fails to import stays "wanted" in *arr, so the next 300-second loop re-grabs it. r:soul already proves the fix (persistent state + reconcile-on-restart). Curator must adopt that model as its spine.
 
 ---
 
-## Table Stakes
+## Feature Landscape
 
-Features without which the hands-off goal fails. Each is mapped to the prior pain point(s) it addresses: **(P1)** redundant downloads, **(P2)** wrong matches, **(P3)** quality downgrades, **(P4)** complex supplementary config, **(P5)** import/sync friction.
+### Table Stakes (Without these, the hands-off goal fails)
 
-| Feature | Why Expected (pain) | How it typically works | Complexity | Notes |
-|---------|--------------------|------------------------|------------|-------|
-| **Gap detection from *arr wanted/cutoff lists** | Core purpose | Poll Lidarr `GET /api/v1/wanted/missing` + `GET /api/v1/wanted/cutoff` (and Readarr equivalents). These are the canonical "monitored + not satisfied" lists — the *arr already computed the gap. | Low | Don't recompute "what's wanted" — defer entirely to *arr's own logic. Paginate; cache release IDs. |
-| **Grace-then-fallback timing (Usenet wins first)** | Fallback-only mandate | Only treat an item as a *true gap* after it has been wanted for ≥ a configurable grace period (e.g. N days) AND the *arr's normal indexers have had their search cycle. Soulseek is last resort. | Medium | Implement as a per-item "first seen wanted" timestamp in Curator state; eligible only after grace elapses. Optionally read *arr history to confirm no recent successful/pending grab. **(P3 indirectly: avoids grabbing a worse P2P copy before a good Usenet copy lands.)** |
-| **Map *arr item → Soulseek search** | Core (P2) | Build queries from artist+album (music) / author+title (books). slskd search is filename/folder-text based, not metadata-based — results are messy. Issue multiple query variants (with/without year, normalized punctuation/featuring tags). | Medium | Soulseek returns *file lists per user*, grouped by folder. You match on the *folder/file set*, not a clean record. |
-| **Candidate validation & match scoring** | Avoid wrong matches (P2) | Validate against the *arr's known tracklist: expected track count, fuzzy-match track titles, album/edition, duration if available. Score candidates by (completeness × name similarity × quality × uploader health). Reject below a confidence threshold rather than grabbing the "best of bad." | High | This is the #1 differentiator-quality area but is *table stakes* to not regress Soularr. Use normalized string distance + track-count gating. **Refusing to download is a valid, correct outcome.** |
-| **Quality enforcement via *arr profiles (no downgrades)** | No downgrades (P3) | Read the *arr Quality Profile + cutoff for the item; filter slskd candidate files by inferred format/bitrate from filename/extension (FLAC vs 320 vs V0 vs lossy). Never grab below the profile's allowed/cutoff quality. For cutoff-unmet, only grab if candidate *beats* current. | High | slskd exposes file size/extension/bitrate hints; bitrate is often inferable from extension+size or slsk metadata but is **not always reliable** — must be defensive. Defer the *policy* to *arr; Curator only enforces it pre-download. |
-| **Redundant-download prevention (persistent state)** | Redundant downloads (P1) | Durable store keyed by *arr release/item ID with status: `pending` → `searching` → `downloading` → `imported` / `unavailable` / `failed`. Never re-search an `imported` or recently-`unavailable` item. | Medium | This is *the* fix for the most-cited Soularr pain. See "State Model" section below. |
-| **Exponential backoff + "do not retry" memory** | Redundant downloads (P1) | Failed/unavailable items get a backoff timer (e.g. 1d → 3d → 7d → 30d) and a max-attempts cap after which they go `dormant` until *arr signals the want changed. | Medium | Avoids hammering Soulseek for genuinely unavailable obscure items. Reset on *arr edition/monitoring change. |
-| **Clean import handoff to *arr** | Import/sync friction (P5) | Two viable approaches (see below). Drop completed files into a path the *arr watches, then trigger `POST /api/v1/command {name: DownloadedAlbumsScan / RescanFolders}`; or use the **Manual Import API** to map files explicitly. Confirm import succeeded by re-checking item state / *arr history. | High | Must let *arr do rename + move into `/volume1` so Plex sees correctly named files. **Confirm-import is mandatory** — fire-and-forget rescan is a known friction source. |
-| **slskd share configuration (not a leecher)** | Sharing/give-back | Configure slskd `shares` so the account uploads. Soulseek community/servers penalize zero-share leechers (queue deprioritization, bans). Point shares at the imported library (read-only) or a dedicated share dir. | Low–Medium | One-time config + ensure upload slots/limits set so the account stays in good standing. **(operational survival — without it, searches degrade over time.)** |
-| **VPN-routed source traffic (gluetun + PIA)** | Privacy | Run slskd's network egress through gluetun. Soulseek needs an inbound listening port → use PIA **port forwarding** and sync the forwarded port into slskd's listen port. Kill-switch ensures no traffic leaks if VPN drops. | Medium | Port-forward sync is the operationally tricky part (PIA's forwarded port can change on reconnect). slskd behind `network_mode: service:gluetun`. |
-| **Status surface for Homepage** | Observability | Expose gap queue size, in-flight downloads, stuck/failed counts via a small HTTP endpoint (JSON) or Homepage's custom API widget. | Low–Medium | Homepage can read a custom JSON endpoint; design a stable `/status` schema early. |
-| **Push notifications on grab / failure / blocked** | Observability | On state transitions (grabbed, imported, failed-final, VPN-down/blocked) send to a notifier (ntfy / Apprise / Discord webhook). | Low | Notify on *exceptions and successes worth knowing*, not every poll. |
-| **Daemon loop + scheduling** | Hands-off operation | Long-running container with an internal scheduler (poll interval) OR cron-triggered run. Idempotent runs (state-driven) so overlapping/missed runs are safe. | Low–Medium | Must be safe to run repeatedly with no harm — state model guarantees idempotency. |
-| **Self-recovery from failures** | Hands-off operation | Resume interrupted downloads, reconcile slskd transfer state vs Curator state on startup, handle slskd/*arr/VPN being temporarily down with retries, never crash-loop into duplicate grabs. | High | Startup reconciliation against slskd's live transfer list is essential to avoid double-grabbing across restarts. |
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| **Gap detection from *arr wanted lists** | Curator's whole job is acquiring what *arr says is missing | MEDIUM | Read Lidarr `/api/v1/wanted/missing` + `/api/v1/wanted/cutoff`; Readarr equivalent. Only **monitored** items appear — monitoring is the gate ([servarr wiki](https://wiki.servarr.com/lidarr/wanted)). These two lists ARE the gap universe; do NOT maintain a parallel wishlist. (PP4) |
+| **Fallback-only timing ("grace then fallback")** | Usenet must win first; P2P is the gap-filler | MEDIUM-HIGH | An item is a *true gap* only after a grace window where the Usenet path had its chance. See "Gap qualification." This is the core mission feature Soularr lacks (Soularr grabs immediately, default 300s loop). (PP1) |
+| **Map *arr item → Soulseek query** | Soulseek has no metadata IDs — you search free-text filenames | MEDIUM | Build queries from artist+album / author+title. Need fallback query forms (drop punctuation, `artist - album`, title-only). (PP2) |
+| **Candidate validation (artist/album/edition/track)** | Wrong matches are the #1 Soularr complaint | HIGH | r:soul's pattern: pre-filter on **length ratio + Jaccard token overlap**, match **author/title separately** (not one combined string), validate **embedded file metadata** (epub/mobi/azw3 for books) ([rsoul README](https://github.com/insanemal/rsoul)). Reject below threshold rather than grabbing "close enough." (PP2) |
+| **Tracklist completeness check (music)** | A folder with 8/12 tracks → Lidarr import threshold rejects it → infinite re-queue | HIGH | Compare candidate file/track count to the release's expected tracklist *before* downloading. Documented Soularr failure mode ([#68](https://github.com/mrusse/soularr/issues/68)). (PP1, PP5) |
+| **Quality enforcement via *arr profiles** | Owner curated quality intentionally; downgrades unacceptable | MEDIUM-HIGH | Read the item's quality profile; filter candidates by inferred format/bitrate (FLAC/320/V0; epub/azw3/pdf). Cutoff-unmet items only replaced by something *above* current quality. Defer to the profile — don't invent rules. (PP3, PP4) |
+| **Persistent attempt state (attempted/succeeded/unavailable)** | Prevents re-grabbing/re-searching every loop — the root fix for PP1+PP5 | MEDIUM | SQLite store keyed by *arr entity id. r:soul persists state to disk and reconciles with slskd on restart ([rsoul](https://github.com/insanemal/rsoul)). Soularr's biggest gap. (PP1) |
+| **Backoff + "do not retry" memory** | Genuinely-unavailable items must stop consuming cycles/uploads | MEDIUM | Exponential backoff on transient failures; terminal `unavailable` after N exhausted searches. (PP1) |
+| **Clean import handoff to *arr** | Files that don't import are invisible to Plex = mission failure | HIGH | Prefer the **ManualImport command API** over drop-folder for deterministic file→release mapping. Note: payload is undocumented and finicky ([lidarr #5647](https://github.com/Lidarr/Lidarr/issues/5647)). (PP5) |
+| **Import success confirmation** | "Downloaded" ≠ "in library" — Soularr's blind spot | MEDIUM-HIGH | Re-query *arr after import; only mark `succeeded` when the item left the wanted list. Closes the loop that causes PP1's re-download spiral. (PP5) |
+| **slskd share config (anti-leech)** | Soulseek ghosts pure leechers; account dies → all future grabs fail | LOW-MEDIUM | slskd requires sharing **≥1 directory with ≥1 file** to avoid leecher status ([slskd config](https://github.com/slskd/slskd/blob/master/docs/config.md)). Share the read-only library mount. |
+| **Daemon/scheduled loop** | Hands-off = no human triggering runs | LOW | Periodic poll of wanted lists, process gaps, sleep (Soularr uses `SCRIPT_INTERVAL`, default 300s). |
+| **Self-recovery from failures** | A crash/stuck download must not need human rescue | MEDIUM | Idempotent loop + restart-safe state + reconcile in-flight downloads on boot (r:soul pattern). |
+| **VPN-routed source traffic (gluetun+PIA)** | Soulseek peers see your IP; stated infra requirement | MEDIUM | slskd joins gluetun's network namespace. |
+| **VPN port-forward sync** | PIA's forwarded port is random per gluetun restart; slskd needs a reachable listen port or peers can't connect | MEDIUM | Read `/tmp/gluetun/forwarded_port` and set `SLSKD_SLSK_LISTEN_PORT` (or update via slskd HTTP API / `VPN_PORT_FORWARDING_UP_COMMAND`) ([gluetun #1966](https://github.com/qdm12/gluetun/discussions/1966), [slskd #1432](https://github.com/slskd/slskd/issues/1432)). A closed port = degraded peering = unhealthy account. |
+| **Fail-safe when VPN down** | Kill-switch must not poison state with false `unavailable` marks | MEDIUM | If gluetun is down, detect, back off, resume — never mark items unavailable due to a VPN outage. |
 
----
+#### Gap qualification ("grace then fallback") — deciding a *true gap*
 
-## Differentiators
+Soularr's naive rule ("anything wanted = grab now") fights/duplicates the Usenet pipeline (PP1). Fallback-only logic:
+1. **Source of truth:** `wanted/missing` (never acquired) + `wanted/cutoff` (have it, below cutoff). Monitored-only ([servarr wiki](https://wiki.servarr.com/lidarr/wanted)).
+2. **Grace window:** item must have been wanted ≥ configurable age before Curator acts — the "Usenet wins first" guarantee.
+3. **Not in flight elsewhere:** skip if *arr already has an active grab/queue entry from the Usenet client (avoid racing).
+4. **Not already `succeeded`/`unavailable`** in Curator's state.
 
-What makes Curator meaningfully better than raw Soularr / manual slskd. These directly target the owner's stated frustrations.
+#### Import handoff — ManualImport API vs drop-folder
 
-| Feature | Value Proposition | Maps to | Complexity | Notes |
-|---------|-------------------|---------|------------|-------|
-| **Confidence-gated "refuse rather than guess"** | Soularr's biggest failing is grabbing *wrong* or *incomplete* matches. Curator treats a low-confidence match as a non-event (logged, backed off) rather than a download. | P2 | High | The single highest-value differentiator. Requires the strong validation/scoring engine above. |
-| **Cutoff-aware upgrade-only logic** | For cutoff-unmet items, only grab when the P2P candidate *strictly beats* the current file per the *arr profile — never sidegrade or downgrade. | P3 | Medium | Depends on quality-inference + reading current item quality from *arr. |
-| **First-class redundancy memory with provenance** | Persistent per-item ledger ("tried user X's copy on date Y, rejected: 9/12 tracks") so retries are smarter, not blind. | P1 | Medium | Goes beyond Soularr's thinner failed-list handling. |
-| **End-to-end import verification (closed loop)** | Don't just trigger rescan — poll until *arr confirms the item is satisfied, then mark `imported`; if rescan didn't pick it up, fall back to Manual Import API and re-verify. | P5 | High | Eliminates the "downloaded but never imported" silent failure that creates *manual* cleanup labor. |
-| **VPN/port-forward health as a first-class precondition** | Curator refuses to start downloads if kill-switch/port-forward isn't healthy, and auto-syncs PIA's forwarded port into slskd. | Privacy | Medium | Turns a fragile manual setup into a self-healing one. |
-| **Rich Homepage widget + actionable alerts** | Single glance: how many true gaps remain, what's stuck and why, last successful grab. Alerts are actionable (blocked-by-VPN vs no-source-found are different signals). | Observability | Medium | Differentiates from Soularr's log-only UX. |
-| ***-arr-agnostic adapter layer** | Music/books behind a common interface so a Readarr-replacement fork can be swapped without touching core logic. | Future-proofing | Medium | Directly hedges the Readarr-retirement risk. |
-| **Uploader-health-aware selection** | Prefer candidates from users with free slots / good speed / not fully queued, to maximize completion likelihood and reduce stuck transfers. | P1/stuck | Medium | slskd surfaces queue/slot/speed hints per result. |
+| Approach | How | Trade-off |
+|----------|-----|-----------|
+| **Drop folder + rescan** (Soularr-style) | Move files to a watched folder, trigger `DownloadedAlbumsScan`/`RescanFolder` | Simple but *arr's auto-matcher mis-imports/rejects (threshold) → source of PP5 ([#68](https://github.com/mrusse/soularr/issues/68)) |
+| **ManualImport command API** (recommended) | POST explicit file→release mapping to `/api/v1/command` ManualImport, then confirm | Deterministic; you tell *arr exactly which release — but payload undocumented, validate per version ([lidarr #5647](https://github.com/Lidarr/Lidarr/issues/5647)) |
 
----
+Recommend **ManualImport primary, drop-folder fallback**, then poll to confirm. *arr renames into `/volume1` and notifies Plex via its own Plex connection — Curator must NOT talk to Plex directly (anti-feature).
 
-## Anti-Features
+#### Redundant-download state model
 
-Features to explicitly NOT build. Building these reintroduces labor or scope creep — the opposite of the mandate.
-
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|--------------------|
-| **Any interactive "approve this match" prompt / UI for selection** | Reintroduces manual labor — the core thing being eliminated. | Confidence-gate automatically: high-confidence → grab; low-confidence → skip + back off + log. No human in the loop. |
-| **Recomputing/curating "what is wanted"** | The owner already curated in *arr down to track/title. Duplicating that logic creates drift and config burden (P4). | Read wanted/cutoff lists from *arr as the single source of truth. |
-| **Becoming a primary indexer / racing Usenet** | Violates fallback-only mandate; risks downgrades by grabbing P2P before a good Usenet copy lands. | Strict grace-then-fallback gating; Soulseek is always last resort. |
-| **Scope creep into Radarr / Sonarr / Whisparr (video)** | Soulseek is poor for video; doubles surface area; out of mandate. | Music + books only. Hard scope boundary. |
-| **Re-implementing rename/move/organize** | *arr already does this perfectly into `/volume1`; reimplementing causes Plex-naming friction (P5). | Hand files to *arr; let it rename/move. Curator never writes the final library path. |
-| **Custom quality profile system / "supplementary config"** | Prior attempts suffered from complex extra config (P4). | Zero quality config in Curator — read the *arr profile/cutoff verbatim. |
-| **Manual share curation / per-folder share toggling UI** | Manual labor; brittle. | Point slskd at the library (or a dedicated dir) once; leave it. |
-| **Aggressive seeding/ratio gamification beyond "not a leecher"** | Soulseek isn't a ratio economy like private trackers; over-engineering wastes effort. | Just ensure shares exist + upload slots enabled. Good-citizen baseline, nothing more. |
-| **Notification spam (every poll / every candidate)** | Noise defeats the point of hands-off. | Notify only on state transitions worth human awareness (final failure, blocked, success). |
-| **Storing/serving media itself or a download UI** | Plex/*arr own presentation; slskd owns transfers. | Curator is a headless orchestrator + thin status surface. |
-| **Auto-monitoring/auto-adding new wants** | Owner curates; auto-adding pollutes the library. | Never add to *arr; only fulfill what *arr already wants. |
+SQLite keyed by *arr entity id (+ quality target). Per key: `status` (`pending|searching|downloading|importing|succeeded|unavailable|failed`), `attempts`, `last_attempt_at`, `next_eligible_at` (backoff), `failure_reason` (no-results vs incomplete-tracklist vs quality-too-low vs import-rejected), `slskd_download_id` (resume/cleanup). On boot, **reconcile in-flight downloads with slskd** before acting (r:soul). "Do not retry" = terminal `unavailable`, but with a **dormant long-TTL re-check** since Soulseek catalogs change as users come online.
 
 ---
 
-## State Model (the redundancy fix — table-stakes detail)
+### Differentiators (Better than raw Soularr — why this project exists)
 
-Mature *arr-adjacent tools converge on a **durable per-item ledger** keyed by the *arr's stable release/item ID. Recommended states:
+| Feature | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| **True fallback ordering (grace window)** | Stops fighting/duplicating the Usenet pipeline | MEDIUM-HIGH | Headline differentiator. Soularr has no concept of this. (PP1) |
+| **Strict reject-over-grab matching** | Eliminates wrong-album/edition acquisitions | HIGH | Adopt r:soul's multi-layer validation (Jaccard + length-ratio pre-filter, separate author/title, embedded-metadata check) over Soularr's single filename ratio. Err toward "skip, retry later." (PP2) |
+| **Tracklist-complete-only downloads** | No half-albums that *arr rejects and re-queues forever | HIGH | Pre-validate completeness; prefer single-folder full-album candidates. (PP1, PP5) |
+| **Quality-aware candidate ranking** | Always the best profile-acceptable file, never a downgrade | MEDIUM-HIGH | Rank by profile-preferred order, not first-found — fixes the gap behind [soularr #161](https://github.com/mrusse/soularr/issues/161). (PP3) |
+| **Durable do-not-retry w/ dormant re-check** | Unavailable gaps stop wasting cycles but aren't lost forever | MEDIUM | Soulseek catalog changes over time; periodic re-check beats hard-permanent. (PP1) |
+| **Verified closed-loop import** | "Succeeded" means *actually in the Plex-visible library*, not just downloaded | MEDIUM-HIGH | Closes the loop Soularr leaves open and which causes PP1's spiral. (PP5) |
+| **Automated share/give-back management** | Account stays healthy with zero owner effort | MEDIUM | Beyond minimal share: keep free upload slots + non-zero upload speed so the account isn't ghosted. Combined with port-forward sync = good-citizen with no manual tuning. |
+| **Homepage observability surface** | Glanceable gap queue / in-flight / stuck without logging in | MEDIUM | JSON status endpoint for Homepage's custom API widget (slskd itself has a Homepage widget for precedent — [gethomepage](https://gethomepage.dev/widgets/services/slskd/)). |
+| **Push notifications (grab/failure/blocked)** | Hands-off but not blind — pinged only on events worth knowing | LOW-MEDIUM | Notify on import success, repeated-failure, VPN-down/blocked, account-health. Not on routine actions. |
+| **Zero-supplementary-config defaults** | Reuses *arr profiles/paths; minimal Curator knobs | MEDIUM | Discover paths/profiles from *arr APIs vs re-declaring. Directly attacks PP4 (Soularr's many `config.ini` knobs). |
+| **Stuck-download detection + auto-cleanup** | Self-heals hung slskd transfers (common on Soulseek) | MEDIUM | Timeout, cancel, blacklist that source/candidate, try next. |
+| **Pluggable backend seam (optional)** | r:soul proved value of a second source (Stacks) for books | MEDIUM | Not required, but architecting the search/match interface to allow a future source is cheap insurance. Keep OFF by default (scope discipline). |
 
-```
-new → eligible (grace elapsed) → searching → candidate_selected → downloading
-    → imported            (terminal-success; never re-touch)
-    → unavailable         (no acceptable candidate; backoff timer)
-    → failed              (download/import error; backoff + attempt counter)
-    → dormant             (max attempts hit; wait for *arr change signal)
-    → invalidated         (*arr no longer wants it / edition changed → purge)
-```
+#### Search & match on Soulseek — how it works
 
-Key rules:
-- **Idempotency:** every daemon loop is safe to re-run; state, not timing, drives action.
-- **Backoff schedule:** e.g. 1d → 3d → 7d → 30d, capped, then `dormant`.
-- **Reconciliation on startup:** diff Curator state against slskd live transfers AND *arr satisfaction state to avoid double-grabs after a restart.
-- **Invalidation:** if the *arr removes the want or the user changes edition/quality cutoff, purge or re-evaluate the ledger entry.
-- **Provenance log:** record which uploader/copy was tried and why it was rejected (track-count mismatch, quality, stalled).
+slskd search returns per-user file/folder listings (free text, no IDs) via the search API (`searchText`, `fileLimit`, `responseLimit`, `searchTimeout`); downloads enqueued with filename+size ([slskd-api docs](https://slskd-api.readthedocs.io/en/v0.1.4/api.html)). Pipeline:
+1. **Query construction** with fallbacks (punctuation-stripped, `artist - album`, title-only).
+2. **Group results by user+folder** (an album lives in one folder).
+3. **Score each folder:** artist/title fuzzy match, year/edition hints, format/quality, **track-count vs expected**, peer health (free slots, speed, queue length).
+4. **Threshold reject** below confidence — no best-of-bad.
+5. **Pick highest-scoring, profile-acceptable, complete** candidate; prefer users with free slots to avoid stuck queues.
 
-Persistence: SQLite is the pragmatic choice (single-file, transactional, container-friendly).
+Editions are the hard part (deluxe/standard/remaster) — Soularr's documented failure when Lidarr monitors a specific edition ([#164](https://github.com/mrusse/soularr/issues/164)). Year + track-count are the main disambiguating signals.
+
+#### slskd share / give-back specifics
+- Configure + scan ≥1 shared directory containing ≥1 file ([slskd config](https://github.com/slskd/slskd/blob/master/docs/config.md)).
+- Pure leechers get ghosted/banned over time → source starvation.
+- Practical: share a read-only mount of the library Curator builds, keep some free upload slots, non-zero upload speed, reachable port (port-forward sync). Hands-off "good citizen."
 
 ---
 
-## Import Handoff: Two Approaches (decide explicitly)
+### Anti-Features (Commonly tempting, but they reintroduce labor or scope creep)
 
-| Approach | How | Pros | Cons | Verdict |
-|----------|-----|------|------|---------|
-| **Drop-folder + rescan command** | Drop completed files into the *arr's monitored "Downloads"/completed path, then `POST /api/v1/command {name: DownloadedAlbumsScan}` (Lidarr) / RescanFolders. *arr auto-imports + renames. | Simple; mirrors normal download-client flow; *arr handles edge cases. | Auto-import can silently skip ambiguous folders; needs verification loop. | **Default.** Mirrors how *arr expects completed downloads. |
-| **Manual Import API** | Curator calls `GET /api/v1/manualimport?folder=...` to get proposed mappings, fixes/approves them, then `POST /api/v1/command {name: ManualImport, files: [...]}`. | Explicit control over track→file mapping; handles messy P2P folder structures the auto-scan rejects. | More API surface; must replicate some *arr matching. | **Fallback** when auto-rescan fails to import a confirmed-good download. |
-
-**Recommended pattern:** drop-folder + rescan first; if the closed-loop verification shows the item still unsatisfied after N seconds, escalate to Manual Import API; re-verify; only then mark `imported`. This closed loop is the cure for "downloaded but not imported" (P5). *(Endpoint paths are version-sensitive — verify against the running Lidarr v1 / Readarr API.)*
+| Feature | Why Requested | Why Problematic | Alternative |
+|---------|---------------|-----------------|-------------|
+| **Manual approval / interactive prompts** | "Let me confirm matches" | Reintroduces the exact labor Curator removes | Fully automatic; surface via notifications/Homepage |
+| **Curator-owned wishlist / "what to get" UI** | Central control | Owner already curated in *arr; duplication → drift + PP4 | *arr wanted lists are the only source of truth |
+| **Grab immediately (Soularr default)** | Faster fills | Fights/duplicates the Usenet primary path → PP1 | Enforce grace window; fallback-only |
+| **"Close enough"/first-match download** | More hits | Direct cause of PP2 wrong matches | Reject below threshold; retry later |
+| **Half-album / partial downloads** | Partial > nothing | *arr won't import; infinite re-queue → PP1/PP5 | Tracklist-complete-only |
+| **Curator-defined quality rules** | Fine-grained control | Diverges from *arr profiles → PP3/PP4 | Defer entirely to *arr quality profiles/cutoffs |
+| **Direct Plex API integration** | Instant library refresh | Out of scope; *arr already notifies Plex; extra moving part | Let *arr import + Plex's own watch reflect changes |
+| **Radarr/Sonarr/video/Whisparr** | "Do it all" | Scope creep; video genuinely unavailable on Soulseek (per PROJECT.md) | Music (Lidarr) + Books (Readarr) only |
+| **Acting as primary acquirer** | Maximize fills | It's a gap-filler, not a Usenet replacement | Only act post-grace on items the primary path missed |
+| **Re-implementing rename/library layout** | Custom paths | *arr already renames into `/volume1` | Hand files to *arr |
+| **Aggressive infinite retry on unavailable** | Eventually it'll appear | Wastes cycles, hammers Soulseek, hurts account → PP1 | Backoff → dormant `unavailable` + periodic re-check |
+| **Bypassing VPN "for speed"** | Faster transfers | Leaks Soulseek IP; violates infra requirement | All source traffic via gluetun; fail-safe if down |
+| **Manual share/ratio tuning** | Optimize ratio | Reintroduces labor | Automate share + free upload slots |
+| **Storing media in a non-*arr-managed path** | Simpler drop | Causes PP5 import failures | ManualImport API into *arr-managed root |
 
 ---
 
 ## Feature Dependencies
 
 ```
-Gap detection ──> Match & scoring ──> Quality enforcement ──> Download (slskd) ──> Import handoff ──> Import verification
-     │                  │                      │                     │                    │
-     └──────────────────┴──────────────────────┴────> State ledger <┘────────────────────┘   (every stage reads/writes state)
+*arr API client (read wanted/profiles/paths)
+    └──> Gap detection
+            └──> Gap qualification (grace window)
+                    └──requires──> Persistent state store  [THE SPINE]
 
-VPN health (gluetun+PIA port-forward) ──gates──> Download (slskd)   (no healthy VPN ⇒ no downloads)
+slskd API client
+    └──> Search ──> Candidate validation (match + tracklist + quality filter)
+                        └──> Download (slskd)
+                                └──> Import handoff (ManualImport API)
+                                        └──> Import confirmation
+                                                └──> State update (succeeded) ──> Notify
 
-slskd share config ──independent──> (operational health of search over time)
+gluetun+PIA ──> (slskd netns) ──> Port-forward sync ──> Share/give-back config
+    └──> VPN-health detection ──enhances──> fail-safe loop control
 
-State ledger ──feeds──> Status surface (Homepage) ──and──> Notifications
+Persistent state store ──> Observability endpoint ──> Homepage widget
+Persistent state store ──> Backoff/do-not-retry ──> Daemon loop ──> Self-recovery (reconcile)
+All terminal/error events ──> Push notifications
 
-Daemon loop ──orchestrates──> all of the above; Self-recovery reconciles State ledger vs slskd + *arr on startup
+Candidate validation ──conflicts──> "first-match/close-enough" grabbing (anti-feature)
+Grace window ──conflicts──> "grab immediately" (anti-feature)
 ```
 
-Critical path for MVP (music): **Gap detection → Match/scoring → Quality filter → slskd download (behind VPN) → drop-folder+rescan → import verification → state ledger**. Everything else (books, rich widget, fancy notifications) layers on after this loop closes reliably.
+### Dependency Notes
+- **Persistent state store is the spine.** Gap qualification, backoff, observability, and self-recovery all read/write it. Build first — it's the root fix for PP1+PP5 that Soularr lacks.
+- **Candidate validation gates everything downstream** and is the highest-complexity, highest-risk item (fixes PP2). Spike it early against real Soulseek results.
+- **Import confirmation depends on the ManualImport payload shape** — undocumented; validate before committing the design (PP5).
+- **VPN-health detection must wrap the slskd client** — otherwise a VPN drop poisons state with false `unavailable`.
+- **Share/give-back depends on port-forward sync** for peer reachability.
+- **Self-recovery depends on reconcile-on-restart** against slskd (r:soul pattern) so restarts don't duplicate in-flight downloads.
 
 ---
 
-## MVP Recommendation
+## MVP Definition
 
-Build in this order (each builds on prior; state ledger underpins all):
+### Launch With (v1)
+- [ ] **State store + *arr read client + gap detection** — the spine; "what would I work on" (PP1)
+- [ ] **Gap qualification (grace window)** — proves fallback-only on real data (PP1)
+- [ ] **slskd search + candidate validation (match + tracklist + quality)** — the hard, risky core (PP1/PP2/PP3); spike heavily
+- [ ] **Download + ManualImport handoff + import confirmation** — closes the loop (PP5)
+- [ ] **Backoff / do-not-retry + daemon loop + reconcile-on-restart** — makes it hands-off (PP1)
+- [ ] **VPN integration (gluetun+PIA, kill-switch-safe, port-forward sync) + minimal share** — privacy + account survival
 
-1. **State ledger + gap detection (Lidarr)** — read wanted/cutoff, persist eligibility with grace timer. *(Fixes P1 foundation.)*
-2. **slskd search + confidence-gated match/scoring + quality filter** — the correctness core; refuse-rather-than-guess. *(Fixes P2, P3.)*
-3. **Download behind gluetun+PIA (with port-forward sync + kill-switch) → drop-folder → rescan → import verification.** *(Fixes P5 + privacy.)*
-4. **slskd share config (not-a-leecher baseline).** *(Operational survival.)*
-5. **Daemon loop + self-recovery + backoff.** *(Hands-off.)*
-6. **Homepage status + push notifications.** *(Observability.)*
-7. **Books (Readarr) via the *-arr-agnostic adapter — feature-flagged, best-effort.** *(Gated on Readarr viability.)*
+### Add After Validation (v1.x)
+- [ ] **Observability endpoint + Homepage widget** — trigger: core pipeline reliably importing
+- [ ] **Push notifications** — trigger: enough volume that polling logs is tedious
+- [ ] **Dormant re-check of `unavailable`** — trigger: confirmed false-negatives appearing later
+- [ ] **Stuck-download auto-cleanup tuning** — trigger: observed hung transfers
 
-**Defer / best-effort:** Books path (Readarr risk); uploader-health-aware selection (optimization, not correctness); rich widget polish.
+### Future Consideration (v2+)
+- [ ] **Pluggable second backend** (e.g. Stacks for books, per r:soul) — defer until Soulseek coverage gaps are proven
+- [ ] **Edition disambiguation refinement** — defer; start with artist+album+trackcount+year, refine after observing real mismatches
 
----
+## Feature Prioritization Matrix
+
+| Feature | User Value | Implementation Cost | Priority |
+|---------|------------|---------------------|----------|
+| Persistent state store | HIGH | MEDIUM | P1 |
+| Gap detection + qualification (grace) | HIGH | MEDIUM | P1 |
+| Candidate validation (match/tracklist/quality) | HIGH | HIGH | P1 |
+| ManualImport handoff + confirmation | HIGH | HIGH | P1 |
+| Backoff / do-not-retry + daemon loop | HIGH | MEDIUM | P1 |
+| VPN + port-forward sync + share | HIGH | MEDIUM | P1 |
+| Self-recovery / reconcile-on-restart | HIGH | MEDIUM | P1 |
+| Observability (Homepage endpoint) | MEDIUM | MEDIUM | P2 |
+| Push notifications | MEDIUM | LOW | P2 |
+| Dormant re-check of unavailable | MEDIUM | LOW | P2 |
+| Stuck-download auto-cleanup | MEDIUM | MEDIUM | P2 |
+| Pluggable second backend | LOW | MEDIUM | P3 |
+| Edition disambiguation refinement | MEDIUM | HIGH | P3 |
+
+## Competitor Feature Analysis
+
+| Feature | Soularr (Lidarr) | r:soul (Readarr fork) | Curator's Approach |
+|---------|------------------|------------------------|--------------------|
+| Trigger | Grab immediately, 300s loop | Same lineage | **Grace-then-fallback** (Usenet wins first) |
+| Matching | Single filename ratio (0.5 default) → PP2 | Jaccard + length-ratio + separate author/title + metadata validation | Adopt r:soul-style multi-layer; reject-over-grab |
+| Tracklist completeness | Weak → partial imports (PP5) | Better (book = single file) | Pre-validate full tracklist (music) |
+| Quality ranking | Weak (PP3) | Configurable | Defer to *arr profile, rank by preferred order |
+| Persistent state | **None → re-downloads (PP1)** | Persists + reconcile on restart | SQLite spine + reconcile (the core fix) |
+| Import | Drop/scan, blind | Auto-import w/ path mapping | ManualImport API + **confirmation** |
+| Share/give-back | Manual (slskd) | Manual (slskd) | Automated share + port-forward sync |
+| Observability | 3rd-party dashboard | Minimal | Homepage endpoint + push notifications |
+| Scope | Music | Books | **Both**, video explicitly excluded |
 
 ## Sources
 
-- Domain knowledge of the *arr ecosystem (Lidarr/Readarr/Servarr APIs), slskd, Soularr (mrusse/soularr), the Soulseek protocol, and gluetun/PIA port-forwarding patterns. **[CONFIDENCE: MEDIUM — training cutoff Jan 2026; external verification was blocked in this environment.]**
-- **Verify before requirements lock:**
-  - Readarr maintenance/retirement status and whether a viable fork exists. **[HIGH PRIORITY]**
-  - Exact slskd REST API surface for search/download/shares + SignalR events (current release).
-  - Lidarr v1 / Readarr API endpoint paths for `wanted/missing`, `wanted/cutoff`, `manualimport`, and `command` names (`DownloadedAlbumsScan`, `RescanFolders`).
-  - slskd's reliability of bitrate/format metadata in search results (affects quality-filter design).
-  - PIA port-forwarding behavior with gluetun (forwarded-port change on reconnect → sync mechanism).
+- Soularr: [repo](https://github.com/mrusse/soularr), [README](https://github.com/mrusse/soularr/blob/main/README.md) — MEDIUM-HIGH (primary reference impl)
+- Soularr pain-point issues: [#164 partial imports/redundant](https://github.com/mrusse/soularr/issues/164), [#179](https://github.com/mrusse/soularr/discussions/179), [#68 import threshold rejection](https://github.com/mrusse/soularr/issues/68), [#161 download priorities/quality](https://github.com/mrusse/soularr/issues/161) — HIGH (direct evidence of PP1/PP2/PP3/PP5)
+- r:soul (Readarr fork, better matching/state model): [repo](https://github.com/insanemal/rsoul) — MEDIUM-HIGH
+- slskd: [config docs](https://github.com/slskd/slskd/blob/master/docs/config.md), [repo](https://github.com/slskd/slskd), [python API docs](https://slskd-api.readthedocs.io/en/v0.1.4/api.html), [Homepage widget](https://gethomepage.dev/widgets/services/slskd/) — MEDIUM-HIGH (leecher rule, search/download API)
+- Lidarr wanted/import: [servarr wiki — wanted](https://wiki.servarr.com/lidarr/wanted), [import troubleshooting](https://wiki.servarr.com/lidarr/import-troubleshooting), [ManualImport API gap #5647](https://github.com/Lidarr/Lidarr/issues/5647) — MEDIUM (UI documented; exact API payload **needs-validation**)
+- VPN/port-forward: [gluetun+slskd #1966](https://github.com/qdm12/gluetun/discussions/1966), [slskd listen-port-at-runtime #1432](https://github.com/slskd/slskd/issues/1432) — MEDIUM-HIGH (three established sync patterns)
+- SoulSync (alt music tool, context): [repo](https://github.com/Nezreka/SoulSync) — LOW (could not fully retrieve internals)
+
+**Needs-validation in an early spike:** exact ManualImport command payload per *arr version; exact `wanted/cutoff` + "in-flight elsewhere" detection fields; slskd share/port HTTP-API endpoints; PIA forwarded-port retrieval mechanics with current gluetun.
+
+---
+*Feature research for: Autonomous Soulseek/slskd gap-filler for Lidarr+Readarr*
+*Researched: 2026-05-29*

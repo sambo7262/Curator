@@ -101,17 +101,48 @@ Explicitly excluded. Documented to prevent scope creep.
 
 ## Traceability
 
-Which phases cover which requirements. Populated during roadmap creation.
+Which phases cover which requirements.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmapper) | — | Pending |
+| INFRA-04 | Phase 1 | Pending |
+| INFRA-05 | Phase 1 | Pending |
+| INFRA-06 | Phase 1 | Pending |
+| INFRA-01 | Phase 2 | Pending |
+| INFRA-02 | Phase 2 | Pending |
+| INFRA-03 | Phase 2 | Pending |
+| GAP-01 | Phase 3 | Pending |
+| MATCH-01 | Phase 3 | Pending |
+| QUAL-01 | Phase 3 | Pending |
+| ACQ-01 | Phase 3 | Pending |
+| ACQ-02 | Phase 3 | Pending |
+| STATE-01 | Phase 3 | Pending |
+| IMPORT-01 | Phase 4 | Pending |
+| IMPORT-02 | Phase 4 | Pending |
+| IMPORT-03 | Phase 4 | Pending |
+| IMPORT-04 | Phase 4 | Pending |
+| IMPORT-05 | Phase 4 | Pending |
+| SHARE-01 | Phase 4 | Pending |
+| SHARE-02 | Phase 4 | Pending |
+| GAP-02 | Phase 5 | Pending |
+| GAP-03 | Phase 5 | Pending |
+| MATCH-02 | Phase 5 | Pending |
+| QUAL-02 | Phase 5 | Pending |
+| QUAL-03 | Phase 5 | Pending |
+| STATE-02 | Phase 5 | Pending |
+| STATE-03 | Phase 5 | Pending |
+| ACQ-03 | Phase 5 | Pending |
+| REL-01 | Phase 6 | Pending |
+| REL-02 | Phase 6 | Pending |
+| REL-03 | Phase 6 | Pending |
+| OBS-01 | Phase 6 | Pending |
+| OBS-02 | Phase 6 | Pending |
 
 **Coverage:**
 - v1 requirements: 32 total
-- Mapped to phases: (pending roadmap)
-- Unmapped: (pending roadmap)
+- Mapped to phases: 32
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-29*
-*Last updated: 2026-05-29 after initial definition*
+*Last updated: 2026-05-29 after roadmap creation (traceability populated)*

@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "mode": "interactive",
+  "mode": "yolo",
   "granularity": "standard",
   "parallelization": true,
   "commit_docs": true,
