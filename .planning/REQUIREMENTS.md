@@ -12,8 +12,8 @@ the music path. Music must work end-to-end before the books adapter is layered i
 
 ### *arr Adapter (the integration seam)
 
-- [ ] **ARR-01**: Curator talks to Lidarr and Readarr through a single `*-arr`-agnostic adapter interface (wanted/missing, cutoff, records, command/import), so Readarr is a pluggable, replaceable module and never couples to the core loop
-- [ ] **ARR-02**: The adapter exposes each item's identity + quality profile/cutoff uniformly to the core, defends against missing/empty Readarr metadata (degrade gracefully, never crash the loop), and lets books be added best-effort without gating music
+- [x] **ARR-01**: Curator talks to Lidarr and Readarr through a single `*-arr`-agnostic adapter interface (wanted/missing, cutoff, records, command/import), so Readarr is a pluggable, replaceable module and never couples to the core loop
+- [x] **ARR-02**: The adapter exposes each item's identity + quality profile/cutoff uniformly to the core, defends against missing/empty Readarr metadata (degrade gracefully, never crash the loop), and lets books be added best-effort without gating music
 
 ### Infrastructure & Deployment
 
@@ -26,8 +26,8 @@ the music path. Music must work end-to-end before the books adapter is layered i
 
 ### Gap Detection
 
-- [ ] **GAP-01**: Curator detects monitored missing items from the `*arr` (wanted/missing) via the adapter
-- [ ] **GAP-02**: Curator detects monitored cutoff-unmet items from the `*arr` (wanted/cutoff) via the adapter
+- [x] **GAP-01**: Curator detects monitored missing items from the `*arr` (wanted/missing) via the adapter
+- [x] **GAP-02**: Curator detects monitored cutoff-unmet items from the `*arr` (wanted/cutoff) via the adapter
 - [ ] **GAP-03**: Curator only acts on an item after a configurable grace window elapses AND no active/queued Usenet grab exists, so the Usenet pipeline gets first crack (fallback-only, never races)
 
 ### Match Validation
@@ -119,10 +119,10 @@ Which phases cover which requirements.
 | INFRA-06 | Phase 1 | Pending |
 | STATE-01 | Phase 2 | Complete (02-02 SQLite-WAL ledger + restart-durability) |
 | STATE-02 | Phase 2 | Complete (02-02 dedup UNIQUE + status-preserving upsert) |
-| ARR-01 | Phase 2 | Pending |
-| ARR-02 | Phase 2 | Pending |
-| GAP-01 | Phase 2 | Pending |
-| GAP-02 | Phase 2 | Pending |
+| ARR-01 | Phase 2 | Complete (02-03) |
+| ARR-02 | Phase 2 | Complete (02-03) |
+| GAP-01 | Phase 2 | Complete (02-03) |
+| GAP-02 | Phase 2 | Complete (02-03) |
 | QUAL-01 | Phase 3 | Pending |
 | QUAL-02 | Phase 3 | Pending |
 | QUAL-03 | Phase 3 | Pending |

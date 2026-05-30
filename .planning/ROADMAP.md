@@ -46,7 +46,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 **Plans**: 4 plans
 - [x] 02-01-PLAN.md — Wave 0: offline *arr JSON fixtures + conftest + dev deps, config.py/package markers, /db mount + DB_PATH wiring [STATE-01] ✓ 2026-05-30
 - [x] 02-02-PLAN.md — SQLite-WAL ledger: schema (items, UNIQUE dedup, status CHECK) + idempotent migrations + status-preserving upsert repo + startup hook [STATE-01, STATE-02] ✓ 2026-05-30
-- [ ] 02-03-PLAN.md — *-arr-agnostic adapter seam: ArrAdapter Protocol + GapItem, LidarrAdapter (missing+cutoff), defensive ReadarrAdapter + circuit breaker [ARR-01, ARR-02, GAP-01, GAP-02]
+- [x] 02-03-PLAN.md — *-arr-agnostic adapter seam: ArrAdapter Protocol + GapItem, LidarrAdapter (missing+cutoff), defensive ReadarrAdapter + circuit breaker [ARR-01, ARR-02, GAP-01, GAP-02] ✓ 2026-05-30
 - [ ] 02-04-PLAN.md — gap_detector wiring: detect_gaps adapters→ledger, end-to-end dedup + Readarr-fault-does-not-gate-music proofs, manual one-shot trigger [GAP-01, GAP-02, STATE-02, ARR-02]
 
 ### Phase 3: Matching & Quality Gating
