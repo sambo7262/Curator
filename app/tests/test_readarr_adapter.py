@@ -80,3 +80,57 @@ def test_breaker_opens():
         assert breaker.get_wanted() == []
     assert breaker._open()              # breaker latched open after repeated faults
     assert breaker.app == "readarr"     # drop-in ArrAdapter identity preserved
+
+
+def test_breaker_recovers_after_cooldown():
+    """WR-04: once the cooldown elapses the breaker goes half-open, and a now-healthy inner call
+    CLOSES it — books re-enable automatically without a process restart."""
+    class _Flaky:
+        app = "readarr"
+
+        def __init__(self):
+            self.healthy = False
+
+        def get_wanted(self):
+            if not self.healthy:
+                raise RuntimeError("readarr down")
+            return ["recovered"]
+
+    inner = _Flaky()
+    # reset_after=0 -> the cooldown is always 'elapsed', so the call after open is half-open.
+    breaker = CircuitBreaker(inner, fail_threshold=2, reset_after=0.0)
+
+    assert breaker.get_wanted() == []   # failure 1
+    assert breaker.get_wanted() == []   # failure 2 -> tripped/open
+    assert breaker._open()
+
+    # Readarr recovers; the next (half-open) trial call succeeds and closes the breaker.
+    inner.healthy = True
+    assert breaker.get_wanted() == ["recovered"]
+    assert not breaker._open()          # closed again — recovery is automatic (no restart)
+    assert breaker.get_wanted() == ["recovered"]
+
+
+def test_breaker_stays_open_during_cooldown():
+    """WR-04: while the cooldown window has NOT elapsed, the breaker short-circuits to [] WITHOUT
+    attempting the inner call (so a hard-down Readarr can't stall the run)."""
+    calls = {"n": 0}
+
+    class _Counting:
+        app = "readarr"
+
+        def get_wanted(self):
+            calls["n"] += 1
+            raise RuntimeError("down")
+
+    # Large reset_after -> cooldown never elapses within the test.
+    breaker = CircuitBreaker(_Counting(), fail_threshold=2, reset_after=10_000.0)
+    breaker.get_wanted()   # failure 1 (inner called)
+    breaker.get_wanted()   # failure 2 -> open (inner called)
+    attempts_at_open = calls["n"]
+    assert attempts_at_open == 2
+
+    # Further calls while cooling down must NOT touch the inner adapter.
+    for _ in range(3):
+        assert breaker.get_wanted() == []
+    assert calls["n"] == attempts_at_open   # inner never attempted during cooldown
