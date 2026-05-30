@@ -15,8 +15,25 @@ DATA = Path("/data")
 
 @app.on_event("startup")
 def _startup() -> None:
-    """Reconcile the SQLite schema on boot so a recreated container is self-healing (STATE-01, criterion 1)."""
-    run_migrations(connect(settings.db_path))
+    """Reconcile the SQLite schema on boot so a recreated container is self-healing (STATE-01, criterion 1).
+
+    Open ONE connection, migrate on it, and RETAIN it on app.state — this is the single
+    long-lived writer connection the WAL single-writer design calls for (BL-02). Later request
+    handlers reuse app.state.db rather than opening their own, and it is closed on shutdown so
+    the WAL is checkpointed deterministically rather than left to GC.
+    """
+    conn = connect(settings.db_path)
+    run_migrations(conn)
+    app.state.db = conn
+
+
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    """Close the retained writer connection so the WAL checkpoints cleanly (BL-02)."""
+    conn = getattr(app.state, "db", None)
+    if conn is not None:
+        conn.close()
+        app.state.db = None
 
 
 @app.get("/healthz")
