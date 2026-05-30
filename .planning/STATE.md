@@ -1,69 +1,90 @@
-# State: Curator
+# Project State: Curator
 
-<!-- Project memory. Updated at phase/plan transitions. -->
+**Last updated:** 2026-05-29
+**Current phase:** Phase 1: VPN-Routed Networking Foundation
+**Status:** Not started
 
 ## Project Reference
 
-**Core Value:** Anything already monitored in Lidarr that the Usenet pipeline can't get is acquired automatically — correctly matched, at the right quality, with no redundant downloads and zero manual interaction.
+See: .planning/PROJECT.md (updated 2026-05-29)
 
-**Current Focus:** Phase 1 — VPN-Routed Source Foundation (establish the gluetun+PIA → slskd → synobridge networking base and reproducible deploy).
-
-**Mode:** mvp (Vertical MVP) — thread a thin end-to-end slice early, then harden.
+**Core value:** Anything already monitored in Lidarr (music) or Readarr (books) that the Usenet pipeline can't get is acquired automatically — correctly matched, at the right quality, with no redundant downloads, no leftover junk on the volume, and zero manual interaction.
+**Current focus:** Stand up the gluetun+PIA / slskd / shared-`/data` networking foundation and the CI/compose deploy loop — the highest-risk layer that gates everything else.
 
 ## Current Position
 
-- **Milestone:** v1 (music-only, Lidarr)
-- **Phase:** 1 — VPN-Routed Source Foundation
-- **Plan:** None yet (run `/gsd:plan-phase 1`)
-- **Status:** Roadmap created; not started
+Phase: 1 of 6 (VPN-Routed Networking Foundation)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-05-29 — Corrected roadmap created (horizontal layers, music + books scope)
 
-**Progress:** Phase 0/5 complete
+Progress: [░░░░░░░░░░] 0%
 
-```
-[ ][ ][ ][ ][ ]  0/5 phases
-```
+Roadmap (6 horizontal layers, all 34 v1 requirements mapped):
+1. **VPN-Routed Networking Foundation** ← next
+2. State Ledger + *arr Adapter + Gap Detection
+3. Matching & Quality Gating
+4. Acquisition, Staging & Clean Import
+5. Autonomy, Sharing & Self-Recovery
+6. Observability & Notifications
+
+Build bottom-up so the riskiest infra surfaces failures first; the state ledger is laid before the source engine (the spine that prevents the prior redundant-download pain). Value lands when the full acquire→stage→import→purge loop closes in Phase 4 and becomes hands-off in Phase 5. Next step: `/gsd:plan-phase 1`.
 
 ## Performance Metrics
 
-| Metric | Value |
-|--------|-------|
-| Phases complete | 0/5 |
-| v1 requirements mapped | 32/32 |
-| v1 requirements satisfied | 0/32 |
+**Velocity:**
+- Total plans completed: 0
+- Average duration: —
+- Total execution time: 0 hours
+
+**By Phase:**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| - | - | - | - |
+
+**Recent Trend:**
+- Last 5 plans: none yet
+- Trend: n/a
+
+*Updated after each plan completion*
 
 ## Accumulated Context
 
-### Key Decisions (carried from PROJECT.md / research)
+### Decisions
 
-- Drive slskd **directly** via its REST API; do NOT adopt Soularr as a runtime dependency (reuse its matching heuristics as reference only).
-- Orchestrator stack: Python 3.12, httpx, pydantic/pydantic-settings, APScheduler, FastAPI+uvicorn (status endpoint), SQLAlchemy/stdlib sqlite3, apprise, tenacity. Pin versions at build (research tool layer could not live-verify).
-- Networking pattern: slskd uses `network_mode: "service:gluetun"`; slskd's `5030` published on gluetun; Curator/Homepage reach slskd at `http://gluetun:5030/api/v0`.
-- PIA port forwarding requires a **non-US** region (e.g. CA Toronto/Montreal); US has no PF.
-- Persistence: SQLite (WAL), bind-mounted to `/volume1`.
-- Status via Homepage `customapi` widget; notifications via Apprise.
-- Automated slskd sharing is MANDATORY (leech-block avoidance).
-- v1 is MUSIC ONLY (Lidarr). Books (Readarr) and spectral-FLAC are v2.
+Full log in PROJECT.md Key Decisions. Recent decisions affecting current work:
 
-### Open TODOs / Verify-Before-Build (from research)
+- **Mode:** Horizontal Layers (standard granularity, yolo, parallelization on) — build complete technical layers and assemble; value lands when the loop closes.
+- **Scope correction (supersedes earlier MVP/music-only run):** v1 = MUSIC (Lidarr, primary) + BOOKS (Readarr, best-effort, behind a `*-arr`-agnostic adapter so Readarr's retired status can't break music). slskd-DIRECT (no Soularr). Import & Cleanup is a first-class layer: download into isolated per-item staging/quarantine → import ONLY wanted files via `*arr` Manual Import → verify → AUTO-PURGE staging (owner's 6th pain: no leftover junk, no manual deletion). Spectral-FLAC is OUT of v1 (heuristic checks only).
+- **Networking (verified):** gluetun on synobridge publishes slskd's ports; slskd `network_mode: service:gluetun`. Curator reaches slskd at `http://gluetun:5030`, NEVER `http://slskd` (#1 misconfig). slskd ≥0.24.4 has NATIVE gluetun PF — do NOT build port-sync. gluetun ctrl server (~v3.40+) needs an apikey, matched in `SLSKD_VPN_GLUETUN_API_KEY`. PIA PF = NON-US region only; bind-mount `/gluetun` (60-day port). `FIREWALL_OUTBOUND_SUBNETS` must include synobridge+LAN; kill-switch ON. Single identical `/data` tree across all four containers → atomic hardlinks; consistent PUID/PGID + umask 002.
+- **Stack:** Python 3.12, httpx + pyarr + slskd-api, APScheduler, SQLModel/SQLite WAL, FastAPI :8674, Apprise. Pin slskd 0.25.1, gluetun v3.x dated tag.
+- Quality defers entirely to `*arr` profiles; matching is precision-over-recall. Infra outages classified separately — never burn a per-item attempt.
 
-1. Pin exact versions: slskd, gluetun (and confirm v3 env var names), Python libs, GitHub Action majors.
-2. Confirm current PIA PF region list; pick non-US PF region.
-3. Confirm slskd listen-port config key and whether it can be set without container restart (drives INFRA-02 mechanism).
-4. Confirm gluetun control-server path `/v1/openvpn/portforwarded` for the current major.
-5. Confirm Homepage `customapi` mapping schema (`mappings`, `additionalField`).
-6. Confirm Lidarr is API **v1** (not v3) and lock the manualimport/command path against the live `/swagger`.
+### Pending Todos
 
-### Blockers
+None yet.
 
-None.
+### Blockers/Concerns
+
+Verify-live before/within the relevant phase (research open questions):
+- [Phase 1] Exact `SLSKD_VPN_*` var casing + control-server apikey key name; gluetun `config.toml` role/apikey shape; current PF-capable PIA region list.
+- [Phase 1] Existing `*arr` mount convention on this Synology — dictates the `/data` layout (settle before the importer).
+- [Phase 2/4] Lidarr/Readarr v1 endpoint/command + ManualImport payload shape vs live `/swagger`.
+- [Phase 5] Hands-off is a testable success criterion (SC5): N days, zero manual actions, gaps still fill.
+
+## Deferred Items
+
+| Category | Item | Status | Deferred At |
+|----------|------|--------|-------------|
+| Quality | QUAL-04 spectral/frequency-cutoff FLAC analysis | v2 | 2026-05-29 (init) |
+| Sources | SRC-01 pluggable second source backend | v2 | 2026-05-29 (init) |
 
 ## Session Continuity
 
-**Last action:** Roadmap and STATE initialized from PROJECT.md + REQUIREMENTS.md + research/STACK.md (2026-05-29).
-
-**Next action:** Run `/gsd:plan-phase 1` to decompose Phase 1 (VPN-Routed Source Foundation) into executable plans.
-
-**Notes:** During this session the sandbox tool layer intermittently returned empty output for some Read/Bash calls (matches the warning in research/STACK.md). The two research docs available are STACK.md and FEATURES.md; the ARCHITECTURE/PITFALLS/SUMMARY files referenced in planning context were not present on disk — phasing was derived directly from REQUIREMENTS.md, PROJECT.md, and STACK.md.
+Last session: 2026-05-29
+Stopped at: Corrected ROADMAP.md + REQUIREMENTS.md traceability + this STATE.md written. Books ride the same layers behind the adapter — enable best-effort only after the music loop is hands-off; never let books gate music.
+Resume file: None — run `/gsd:plan-phase 1`
 
 ---
-*State initialized: 2026-05-29*
+*State initialized: 2026-05-29 after corrected roadmap creation*

@@ -1,6 +1,6 @@
 # Curator
 
-Autonomous, fallback-only Soulseek/slskd gap-filler that acquires music (Lidarr) the Usenet pipeline can't get — correctly matched, at the right quality, no redundant downloads, fully hands-off — on a Synology homelab.
+Autonomous, fallback-only Soulseek/slskd gap-filler that acquires music (Lidarr) and books (Readarr, best-effort) the Usenet pipeline can't get — correctly matched, at the right quality, no redundant downloads, no leftover junk, fully hands-off — on a Synology homelab.
 
 ## GSD Workflow
 
@@ -28,10 +28,10 @@ Run these as slash commands:
 ```
 .planning/
 ├── PROJECT.md           # Project context and vision
-├── REQUIREMENTS.md      # Scoped v1 requirements with REQ-IDs (32 total)
-├── ROADMAP.md           # 6-phase Vertical MVP structure + success criteria
+├── REQUIREMENTS.md      # Scoped v1 requirements with REQ-IDs (34 total)
+├── ROADMAP.md           # 6-phase Horizontal Layers structure + success criteria
 ├── STATE.md             # Current workflow state
-├── config.json          # Workflow preferences (interactive, standard, quality models)
+├── config.json          # Workflow preferences (yolo, standard, quality models)
 └── research/            # Domain research (STACK/FEATURES/ARCHITECTURE/PITFALLS/SUMMARY)
 ```
 
@@ -43,7 +43,7 @@ Run these as slash commands:
 - **Persistence:** `/volume1` bind-mounts with correct PUID/PGID. State store is SQLite.
 - **Quality:** Defer to Lidarr quality profiles/cutoffs; gate candidates BEFORE download; never downgrade.
 - **Behavior:** Strictly supplementary and fallback-only — Usenet always wins first (grace window). Fully hands-off; no manual approval queues or interaction.
-- **Import:** download dir and *arr import dir paths must be **identical** as each container sees them (the #1 import-failure cause).
+- **Import & cleanup:** download into an isolated per-item **staging** dir, import ONLY the wanted files via the *arr **Manual Import API**, then **auto-purge** the staging dir — nothing unwanted reaches the library and no manual deletion is ever needed. Download/import paths must be **identical** across containers (single `/data` mount, atomic hardlinks — the #1 import-failure cause).
 - **Sharing:** automated slskd sharing is mandatory (leech-block avoidance), not optional.
 - **Observability:** status via Homepage `customapi` endpoint; notifications via Apprise.
 - **Deploy:** single docker-compose YAML pulling a Docker Hub image built/pushed by GitHub Actions; iterate by teardown/rebuild.
@@ -51,7 +51,7 @@ Run these as slash commands:
 ## Key Decisions
 
 - **Build slskd-direct, NOT Soularr** — owning the loop is the only way to fix dedup/match/quality at the root (Soularr's weaknesses were the prior pain points).
-- **v1 is music-only (Lidarr)** — books (Readarr) and spectral-FLAC validation are v2.
+- **v1 = music (Lidarr, primary) + books (Readarr, best-effort, isolated behind a *-arr-agnostic adapter)** — spectral-FLAC authenticity analysis is out of scope (owner prioritizes right-music over fake-quality).
 - **Stack:** slskd + gluetun/PIA + Python 3.12/FastAPI orchestrator + SQLite + Apprise + Homepage widget + GitHub Actions → Docker Hub.
 
 ---

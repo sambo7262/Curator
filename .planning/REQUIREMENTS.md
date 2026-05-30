@@ -1,88 +1,93 @@
 # Requirements: Curator
 
 **Defined:** 2026-05-29
-**Core Value:** Anything already monitored in Lidarr that the Usenet pipeline can't get is acquired automatically — correctly matched, at the right quality, with no redundant downloads and zero manual interaction.
+**Core Value:** Anything already monitored in Lidarr (music) or Readarr (books) that the Usenet pipeline can't get is acquired automatically — correctly matched, at the right quality, with no redundant downloads, no leftover junk on the volume, and zero manual interaction.
 
 ## v1 Requirements
 
-Autonomous, fallback-only **music** gap-filling (Lidarr) via slskd, fully hands-off. Books (Readarr) deferred to v2.
+Autonomous, fallback-only gap-filling via slskd (direct, no Soularr), fully hands-off.
+**Scope = MUSIC (Lidarr, primary) + BOOKS (Readarr, best-effort).** Both ship in v1. Readarr is isolated
+behind a `*-arr`-agnostic adapter so its retired/unmaintained status (or a future replacement) can never break
+the music path. Music must work end-to-end before the books adapter is layered in.
+
+### *arr Adapter (the integration seam)
+
+- [ ] **ARR-01**: Curator talks to Lidarr and Readarr through a single `*-arr`-agnostic adapter interface (wanted/missing, cutoff, records, command/import), so Readarr is a pluggable, replaceable module and never couples to the core loop
+- [ ] **ARR-02**: The adapter exposes each item's identity + quality profile/cutoff uniformly to the core, defends against missing/empty Readarr metadata (degrade gracefully, never crash the loop), and lets books be added best-effort without gating music
 
 ### Infrastructure & Deployment
 
-- [ ] **INFRA-01**: slskd traffic routes through a gluetun + PIA VPN sidecar with port forwarding on a non-US region, with a kill-switch that prevents IP leak if the VPN drops
-- [ ] **INFRA-02**: The gluetun forwarded port is synced to slskd's listen port automatically whenever it changes
-- [ ] **INFRA-03**: The Curator orchestrator runs on the `synobridge` network, reaching Lidarr/Plex by container name and slskd via gluetun's published port
+- [ ] **INFRA-01**: slskd traffic routes through a gluetun + PIA VPN sidecar with port forwarding on a non-US PF-capable region, kill-switch ON (fail-closed — no IP/DNS leak if the VPN drops), and `FIREWALL_OUTBOUND_SUBNETS` set so the `*arr` API stays reachable from inside the tunnel
+- [ ] **INFRA-02**: The gluetun forwarded port is synced to slskd's listen port automatically whenever it changes (slskd native gluetun integration; control-server apikey configured), surviving restarts
+- [ ] **INFRA-03**: The Curator orchestrator runs on the `synobridge` network, reaching Lidarr/Readarr/Plex by container name and slskd via gluetun's published port (`http://gluetun:5030`, never `http://slskd`)
 - [ ] **INFRA-04**: The whole stack deploys from a single docker-compose YAML that pulls a Docker Hub image
-- [ ] **INFRA-05**: GitHub Actions builds and pushes a `linux/amd64` image to Docker Hub on commit
-- [ ] **INFRA-06**: Config, state DB, and downloads use `/volume1` bind-mounts with correct PUID/PGID ownership
+- [ ] **INFRA-05**: GitHub Actions builds and pushes a `linux/amd64` image to Docker Hub on commit, with no secrets baked into the image
+- [ ] **INFRA-06**: Config, state DB, and downloads use `/volume1` bind-mounts with a single identical `/data` tree across slskd/curator/Lidarr/Readarr (atomic hardlink imports) and correct PUID/PGID + umask ownership
 
 ### Gap Detection
 
-- [ ] **GAP-01**: Curator detects monitored missing items from Lidarr (wanted/missing)
-- [ ] **GAP-02**: Curator detects monitored cutoff-unmet items from Lidarr (wanted/cutoff)
-- [ ] **GAP-03**: Curator only acts on an item after a configurable grace window elapses, so the Usenet pipeline gets first crack (fallback-only)
+- [ ] **GAP-01**: Curator detects monitored missing items from the `*arr` (wanted/missing) via the adapter
+- [ ] **GAP-02**: Curator detects monitored cutoff-unmet items from the `*arr` (wanted/cutoff) via the adapter
+- [ ] **GAP-03**: Curator only acts on an item after a configurable grace window elapses AND no active/queued Usenet grab exists, so the Usenet pipeline gets first crack (fallback-only, never races)
 
 ### Match Validation
 
-- [ ] **MATCH-01**: Curator scores slskd candidates against the item's MusicBrainz identity (artist, album, track-count completeness, edition/year, format)
-- [ ] **MATCH-02**: Curator rejects candidates below a configurable confidence threshold rather than downloading a wrong match
+- [ ] **MATCH-01**: Curator scores slskd candidates against the item's authoritative identity (artist/album, track-count completeness, edition/year, format for music; author/title + format/edition for books)
+- [ ] **MATCH-02**: Curator rejects candidates below a configurable confidence threshold (precision over recall) rather than downloading a wrong match
 
 ### Quality Enforcement
 
-- [ ] **QUAL-01**: Curator reads the item's Lidarr quality profile and cutoff via the API
+- [ ] **QUAL-01**: Curator reads the item's `*arr` quality profile and cutoff via the adapter
 - [ ] **QUAL-02**: Curator filters slskd candidates by format/bitrate BEFORE downloading and never grabs below cutoff (no downgrades)
 - [ ] **QUAL-03**: Curator applies heuristic fake/transcoded-FLAC checks (bitrate/size/source-tag sanity) before accepting a FLAC candidate
 
 ### Persistent State & Dedup
 
-- [ ] **STATE-01**: Curator persists each tracked item's status (pending/searching/grabbed/imported/unavailable/blacklisted) in SQLite
-- [ ] **STATE-02**: Curator never re-downloads an item that is already satisfied or in-flight (dedup)
-- [ ] **STATE-03**: Curator applies exponential backoff to retries and permanently remembers genuinely-unavailable items so it stops retrying them
+- [ ] **STATE-01**: Curator persists each tracked item's lifecycle status (pending/searching/grabbed/downloaded/imported/unavailable/blacklisted) in SQLite (WAL) — the spine, built before the source engine
+- [ ] **STATE-02**: Curator never re-downloads an item that is already satisfied or in-flight (dedup keyed on stable `*arr` identity)
+- [ ] **STATE-03**: Curator applies exponential backoff to retries and permanently remembers genuinely-unavailable items (long-TTL dormant re-check) so it stops retrying them
 
 ### Acquisition
 
 - [ ] **ACQ-01**: Curator triggers slskd searches via REST API for eligible gaps
-- [ ] **ACQ-02**: Curator initiates the chosen candidate's download via slskd and watches it to completion
-- [ ] **ACQ-03**: Curator handles partial/failed/stalled downloads (cancel, mark, back off)
+- [ ] **ACQ-02**: Curator initiates the chosen candidate's download via slskd into an isolated per-item staging/quarantine dir and watches it to completion
+- [ ] **ACQ-03**: Curator handles partial/failed/stalled downloads (timeout, cancel, mark, back off) and never holds a slot forever
 
-### Import Handoff
+### Import & Cleanup
 
-- [ ] **IMPORT-01**: Completed downloads land where Lidarr can import them, with identical paths as seen by each container
-- [ ] **IMPORT-02**: Curator triggers Lidarr import/rename via the Manual Import / command API rather than blind drop-folder
-- [ ] **IMPORT-03**: Curator verifies the item imported successfully into the `/volume1` library
+- [ ] **IMPORT-01**: Completed downloads land in an isolated per-item staging/quarantine dir on the shared `/data` tree, at a path addressed identically by slskd, Curator, and the `*arr` (hardlink-capable, no cross-FS copy)
+- [ ] **IMPORT-02**: Curator imports ONLY the wanted files via the `*arr` Manual Import / command API (never a blind drop-folder rescan), telling the `*arr` exactly which release/files to take
+- [ ] **IMPORT-03**: Curator verifies the item actually imported into the `/volume1` library (re-queries the `*arr`; "downloaded" never counts as "imported")
 - [ ] **IMPORT-04**: Curator confirms Plex reflects the new media (triggers/verifies a library scan)
-- [ ] **IMPORT-05**: Curator reconciles or surfaces import failures instead of silently dropping them
+- [ ] **IMPORT-05**: After a verified import (or terminal failure) Curator AUTO-PURGES the per-item staging/quarantine dir, so leftover/unwanted files never reach `/volume1` and never need manual deletion; unresolved import failures are reconciled or surfaced, never silently dropped
 
 ### Automated Sharing
 
-- [ ] **SHARE-01**: Curator configures slskd shares pointing at real library content so the account isn't blocked as a leecher
-- [ ] **SHARE-02**: Sharing stays active with no manual intervention
+- [ ] **SHARE-01**: Curator configures slskd shares pointing at real (read-only) library content so the account isn't blocked as a leecher
+- [ ] **SHARE-02**: Sharing stays active and scanned (shared-file count > 0) with no manual intervention
 
 ### Reliability & Hands-Off Operation
 
 - [ ] **REL-01**: Curator runs continuously as a daemon with a scheduled poll loop and requires no manual triggering
-- [ ] **REL-02**: Curator self-recovers from transient failures (Lidarr/slskd/VPN restarts, network blips) without manual intervention
+- [ ] **REL-02**: Curator self-recovers from transient failures (Lidarr/Readarr/slskd/VPN restarts, network blips) without manual intervention, classifying infra outages separately so they never burn a per-item attempt, and reconciles state on startup (no orphaned in-flight, no double-import)
 - [ ] **REL-03**: Curator surfaces stuck items (exceeded retries / blocked / unresolved) rather than failing silently
 
 ### Observability
 
-- [ ] **OBS-01**: Curator exposes a JSON status endpoint (gap queue, in-flight, stuck counts) consumable by a Homepage `customapi` widget
-- [ ] **OBS-02**: Curator sends push notifications via Apprise on grab/import/failure/blocked events
+- [ ] **OBS-01**: Curator exposes a JSON status endpoint (gap queue, in-flight, stuck counts, VPN/slskd health) consumable by a Homepage `customapi` widget
+- [ ] **OBS-02**: Curator sends push notifications via Apprise on grab/import/failure/blocked events (event-driven only, no routine spam)
 
 ## v2 Requirements
 
 Deferred to future release. Tracked but not in the current roadmap.
 
-### Books (Readarr)
-
-- **BOOK-01**: Detect monitored missing/cutoff-unmet book items from Readarr
-- **BOOK-02**: Match book candidates by author + title + format/edition
-- **BOOK-03**: Import handoff to Readarr → library → Plex
-- **BOOK-04**: Isolate Readarr behind an adapter so its unmaintained status (or replacement) doesn't ripple into the core loop
-
 ### Quality (deeper)
 
-- **QUAL-04**: Spectral/frequency-cutoff analysis to detect upscaled/transcoded FLAC with high confidence
+- **QUAL-04**: Spectral/frequency-cutoff analysis to detect upscaled/transcoded FLAC with high confidence (OUT of v1 scope — heuristic checks only in QUAL-03)
+
+### Sources
+
+- **SRC-01**: Pluggable second source backend (e.g. for book coverage gaps) behind the search/match seam
 
 ## Out of Scope
 
@@ -91,13 +96,14 @@ Explicitly excluded. Documented to prevent scope creep.
 | Feature | Reason |
 |---------|--------|
 | Radarr/Sonarr / video support | Soulseek is weak for video; that media is genuinely unavailable, not indexer-missing |
-| Soularr dependency | slskd-direct chosen to fix dedup/match/quality at the root (Soularr's weaknesses are the prior pain points) |
+| Soularr dependency | slskd-direct chosen to fix dedup/match/quality at the root (Soularr's weaknesses are the prior pain points); also Lidarr-only, can't do books |
+| Spectral-FLAC analysis (v1) | Deferred to QUAL-04; v1 uses heuristic sanity checks only |
 | Pure public torrents | Owner prefers SSL/private posture; ruled out |
-| Standalone dashboard UI | Status surfaces through the owner's existing Homepage widget instead |
+| Standalone dashboard UI | Status surfaces through the owner's existing Homepage widget (an API contract, not a UI) |
 | Web search/browse UI | Reintroduces manual interaction; contradicts hands-off core value |
 | Manual approval queue / day-to-day interaction | Contradicts hands-off core value |
 | Becoming a primary downloader | Strictly supplementary by design — Usenet always wins first |
-| Manual file mapping | The exact labor Curator exists to eliminate |
+| Manual file mapping / manual junk cleanup | The exact labor Curator exists to eliminate (auto-purge handles cleanup) |
 
 ## Traceability
 
@@ -105,44 +111,46 @@ Which phases cover which requirements.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
+| INFRA-01 | Phase 1 | Pending |
+| INFRA-02 | Phase 1 | Pending |
+| INFRA-03 | Phase 1 | Pending |
 | INFRA-04 | Phase 1 | Pending |
 | INFRA-05 | Phase 1 | Pending |
 | INFRA-06 | Phase 1 | Pending |
-| INFRA-01 | Phase 2 | Pending |
-| INFRA-02 | Phase 2 | Pending |
-| INFRA-03 | Phase 2 | Pending |
-| GAP-01 | Phase 3 | Pending |
-| MATCH-01 | Phase 3 | Pending |
+| STATE-01 | Phase 2 | Pending |
+| STATE-02 | Phase 2 | Pending |
+| ARR-01 | Phase 2 | Pending |
+| ARR-02 | Phase 2 | Pending |
+| GAP-01 | Phase 2 | Pending |
+| GAP-02 | Phase 2 | Pending |
 | QUAL-01 | Phase 3 | Pending |
-| ACQ-01 | Phase 3 | Pending |
-| ACQ-02 | Phase 3 | Pending |
-| STATE-01 | Phase 3 | Pending |
+| QUAL-02 | Phase 3 | Pending |
+| QUAL-03 | Phase 3 | Pending |
+| MATCH-01 | Phase 3 | Pending |
+| MATCH-02 | Phase 3 | Pending |
+| ACQ-01 | Phase 4 | Pending |
+| ACQ-02 | Phase 4 | Pending |
+| ACQ-03 | Phase 4 | Pending |
 | IMPORT-01 | Phase 4 | Pending |
 | IMPORT-02 | Phase 4 | Pending |
 | IMPORT-03 | Phase 4 | Pending |
 | IMPORT-04 | Phase 4 | Pending |
 | IMPORT-05 | Phase 4 | Pending |
-| SHARE-01 | Phase 4 | Pending |
-| SHARE-02 | Phase 4 | Pending |
-| GAP-02 | Phase 5 | Pending |
 | GAP-03 | Phase 5 | Pending |
-| MATCH-02 | Phase 5 | Pending |
-| QUAL-02 | Phase 5 | Pending |
-| QUAL-03 | Phase 5 | Pending |
-| STATE-02 | Phase 5 | Pending |
 | STATE-03 | Phase 5 | Pending |
-| ACQ-03 | Phase 5 | Pending |
-| REL-01 | Phase 6 | Pending |
-| REL-02 | Phase 6 | Pending |
-| REL-03 | Phase 6 | Pending |
+| SHARE-01 | Phase 5 | Pending |
+| SHARE-02 | Phase 5 | Pending |
+| REL-01 | Phase 5 | Pending |
+| REL-02 | Phase 5 | Pending |
+| REL-03 | Phase 5 | Pending |
 | OBS-01 | Phase 6 | Pending |
 | OBS-02 | Phase 6 | Pending |
 
 **Coverage:**
-- v1 requirements: 32 total
-- Mapped to phases: 32
+- v1 requirements: 34 total
+- Mapped to phases: 34
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-29*
-*Last updated: 2026-05-29 after roadmap creation (traceability populated)*
+*Last updated: 2026-05-29 after roadmap creation (corrected scope: music + books, staging/auto-purge cleanup layer, *-arr-agnostic adapter; traceability repopulated)*
