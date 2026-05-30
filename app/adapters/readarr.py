@@ -30,16 +30,21 @@ class ReadarrAdapter:
         self._client = client
         self._headers = {"X-Api-Key": api_key}   # [VERIFIED: Servarr v1 auth header]
 
+    # Defensive cap mirroring LidarrAdapter — terminates even if Readarr reports bad pagination.
+    _MAX_PAGES = 1000
+
     def _paged(self, path: str) -> list:
         """Page through the verified envelope BUT swallow ANY fault -> [].
 
         Identical paging loop to Lidarr's except includeAuthor=true and a try/except over
         httpx errors (HTTPError, timeout) + JSON/shape errors: log a warning and return []
         so a 5xx / timeout / hung Readarr never propagates into the detection loop (ARR-02).
+        Termination guard mirrors Lidarr (BL-01): stop on an empty page, on the cutoff, or at
+        a hard page cap so a pageSize:0 / bad-totalRecords envelope cannot spin forever.
         """
         records, page = [], 1
         try:
-            while True:
+            while page <= self._MAX_PAGES:
                 r = self._client.get(
                     f"{self._base}/api/v1/{path}",
                     headers=self._headers,
@@ -55,8 +60,10 @@ class ReadarrAdapter:
                 )
                 r.raise_for_status()
                 body = r.json()
-                records += body.get("records", [])
-                if page * body.get("pageSize", 100) >= body.get("totalRecords", 0):
+                batch = body.get("records", [])
+                records += batch
+                page_size = body.get("pageSize") or 100   # treat 0/None as the default page size
+                if not batch or page * page_size >= body.get("totalRecords", 0):
                     break
                 page += 1
         except (httpx.HTTPError, ValueError, TypeError, KeyError) as e:

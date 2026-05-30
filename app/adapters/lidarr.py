@@ -26,14 +26,20 @@ class LidarrAdapter:
         self._client = client
         self._headers = {"X-Api-Key": api_key}   # [VERIFIED: Servarr v1 auth header]
 
+    # Defensive cap: at pageSize=100 this allows ~100k records before bailing — far above any
+    # realistic monitored-gap count — yet still terminates if a server reports bad pagination.
+    _MAX_PAGES = 1000
+
     def _paged(self, path: str) -> list:
         """Page through the verified {page,pageSize,totalRecords,records} envelope.
 
         Lidarr is primary: r.raise_for_status() lets a hard fault surface (NOT swallowed,
-        NOT breaker-wrapped). Stops when page*pageSize >= totalRecords.
+        NOT breaker-wrapped). Stops when a page returns no records, when
+        page*pageSize >= totalRecords, or at a hard page cap — so a misbehaving server
+        reporting pageSize:0 (or totalRecords > data) can never spin the loop forever (BL-01).
         """
         records, page = [], 1
-        while True:
+        while page <= self._MAX_PAGES:
             r = self._client.get(
                 f"{self._base}/api/v1/{path}",
                 headers=self._headers,
@@ -49,8 +55,12 @@ class LidarrAdapter:
             )
             r.raise_for_status()
             body = r.json()                       # { page, pageSize, totalRecords, records:[...] }
-            records += body.get("records", [])
-            if page * body.get("pageSize", 100) >= body.get("totalRecords", 0):
+            batch = body.get("records", [])
+            records += batch
+            # Treat a non-positive/None pageSize as the request default (100) so a server-reported
+            # pageSize:0 can't make the cutoff test always-false; an empty page always terminates.
+            page_size = body.get("pageSize") or 100
+            if not batch or page * page_size >= body.get("totalRecords", 0):
                 break
             page += 1
         return records

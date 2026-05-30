@@ -10,6 +10,8 @@ Offline-only: uses the conftest httpx_client factory (httpx.MockTransport) — n
 The real run is Python 3.12 at CI/NAS; the local sandbox (Python 3.9 + no httpx) gates on
 AST-parse + grep (see plan <automated>).
 """
+import httpx
+
 from adapters.base import ArrAdapter, GapItem
 from adapters.lidarr import LidarrAdapter
 
@@ -52,6 +54,34 @@ def test_cutoff_and_paging(httpx_client, load_fixture):
     ids = {g.arr_id for g in cutoff}
     assert ids == {str(r["id"]) for r in page1 + page2}
     assert all(g.gap_type == "cutoff" and g.kind == "album" for g in cutoff)
+
+
+def test_paging_terminates_on_malformed_envelope():
+    """BL-01: a server reporting pageSize:0 with a non-zero totalRecords (so the arithmetic
+    cutoff `page*pageSize >= totalRecords` is ALWAYS false) must NOT spin forever — the empty-page
+    / pageSize-normalisation guard terminates the loop instead of hanging the primary path."""
+    calls = {"n": 0}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        # Page 1 returns one record but a poisoned pageSize:0 + totalRecords:5; every later
+        # page returns an EMPTY records list. Without the guard the loop never terminates.
+        if int(request.url.params.get("page", "1")) == 1:
+            return httpx.Response(200, json={
+                "page": 1, "pageSize": 0, "totalRecords": 5,
+                "records": [{"id": 1, "title": "A", "foreignAlbumId": "m1",
+                             "profileId": 1, "artist": {"artistName": "X"}}],
+            })
+        return httpx.Response(200, json={"page": 2, "pageSize": 0, "totalRecords": 5, "records": []})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    adapter = LidarrAdapter("http://test-arr", "k", client)
+
+    gaps = adapter.get_wanted()   # must RETURN (not hang); empty page stops paging
+    # one mapped record per route (missing + cutoff) since each route empties on page 2
+    assert len(gaps) == 2
+    # the loop made a bounded number of requests, not an unbounded spin
+    assert calls["n"] < 10
 
 
 def test_lidarr_satisfies_protocol(httpx_client):
