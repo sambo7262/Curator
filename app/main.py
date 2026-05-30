@@ -6,8 +6,17 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from config import settings
+from state.db import connect, run_migrations
+
 app = FastAPI(title="Curator", version="0.2.0-phase2")
 DATA = Path("/data")
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    """Reconcile the SQLite schema on boot so a recreated container is self-healing (STATE-01, criterion 1)."""
+    run_migrations(connect(settings.db_path))
 
 
 @app.get("/healthz")
