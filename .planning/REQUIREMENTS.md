@@ -118,11 +118,11 @@ Which phases cover which requirements.
 | INFRA-05 | Phase 1 | Pending |
 | INFRA-06 | Phase 1 | Pending |
 | STATE-01 | Phase 2 | Complete (02-02 SQLite-WAL ledger + restart-durability) |
-| STATE-02 | Phase 2 | Complete (02-02 dedup UNIQUE + status-preserving upsert) |
+| STATE-02 | Phase 2 | Complete (02-02 dedup UNIQUE + status-preserving upsert; 02-04 dedup + status-preservation proven end-to-end through detect_gaps) |
 | ARR-01 | Phase 2 | Complete (02-03) |
-| ARR-02 | Phase 2 | Complete (02-03) |
-| GAP-01 | Phase 2 | Complete (02-03) |
-| GAP-02 | Phase 2 | Complete (02-03) |
+| ARR-02 | Phase 2 | Complete (02-03; 02-04 Readarr-fault-does-not-gate-music proven end-to-end through detect_gaps) |
+| GAP-01 | Phase 2 | Complete (02-03; 02-04 missing detected→persisted end-to-end) |
+| GAP-02 | Phase 2 | Complete (02-03; 02-04 cutoff detected→persisted end-to-end) |
 | QUAL-01 | Phase 3 | Pending |
 | QUAL-02 | Phase 3 | Pending |
 | QUAL-03 | Phase 3 | Pending |

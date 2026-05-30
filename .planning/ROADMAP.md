@@ -11,7 +11,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 ## Phases
 
 - [x] **Phase 1: VPN-Routed Networking Foundation** - gluetun+PIA tunnel (kill-switch, non-US PF, firewall subnets), slskd routed through it and reachable on synobridge, single shared `/data` mount, deployed from compose pulling a CI-built image ✓ *deployed & verified on NAS 2026-05-30 (slskd logged into Soulseek via PIA Vancouver, port 56034)*
-- [ ] **Phase 2: State Ledger + *arr Adapter + Gap Detection** - SQLite spine plus a `*-arr`-agnostic adapter that detects monitored missing/cutoff gaps and dedups them, with Readarr isolated behind the seam
+- [x] **Phase 2: State Ledger + *arr Adapter + Gap Detection** - SQLite spine plus a `*-arr`-agnostic adapter that detects monitored missing/cutoff gaps and dedups them, with Readarr isolated behind the seam ✓ *all 4 plans complete 2026-05-30; detection wired end-to-end with dedup + Readarr-no-gate proven*
 - [ ] **Phase 3: Matching & Quality Gating** - candidates scored against authoritative identity and filtered by `*arr` profile/cutoff (incl. fake-FLAC heuristics), rejecting wrong/low-quality matches before any download
 - [ ] **Phase 4: Acquisition, Staging & Clean Import** - eligible gaps are searched, downloaded into an isolated quarantine dir, imported (wanted files only) via Manual Import, verified into the library + Plex, then the staging dir is auto-purged
 - [ ] **Phase 5: Autonomy, Sharing & Self-Recovery** - the grace-gated daemon runs hands-off with backoff/do-not-retry, slskd shares real library content to stay unblocked, and the loop self-recovers and surfaces stuck items
@@ -47,7 +47,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 - [x] 02-01-PLAN.md — Wave 0: offline *arr JSON fixtures + conftest + dev deps, config.py/package markers, /db mount + DB_PATH wiring [STATE-01] ✓ 2026-05-30
 - [x] 02-02-PLAN.md — SQLite-WAL ledger: schema (items, UNIQUE dedup, status CHECK) + idempotent migrations + status-preserving upsert repo + startup hook [STATE-01, STATE-02] ✓ 2026-05-30
 - [x] 02-03-PLAN.md — *-arr-agnostic adapter seam: ArrAdapter Protocol + GapItem, LidarrAdapter (missing+cutoff), defensive ReadarrAdapter + circuit breaker [ARR-01, ARR-02, GAP-01, GAP-02] ✓ 2026-05-30
-- [ ] 02-04-PLAN.md — gap_detector wiring: detect_gaps adapters→ledger, end-to-end dedup + Readarr-fault-does-not-gate-music proofs, manual one-shot trigger [GAP-01, GAP-02, STATE-02, ARR-02]
+- [x] 02-04-PLAN.md — gap_detector wiring: detect_gaps adapters→ledger, end-to-end dedup + Readarr-fault-does-not-gate-music proofs, manual one-shot trigger [GAP-01, GAP-02, STATE-02, ARR-02] ✓ 2026-05-30
 
 ### Phase 3: Matching & Quality Gating
 **Goal**: Curator decides what is worth grabbing before spending a download: it scores slskd candidates against the item's authoritative identity (artist/album, track-count completeness, edition/year, format; author/title/format for books), reads the `*arr` quality profile/cutoff, filters candidates to profile-acceptable formats/bitrates, applies fake/transcoded-FLAC heuristics, and refuses anything below the confidence threshold — precision over recall.
@@ -97,7 +97,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. VPN-Routed Networking Foundation | 4/4 | ✓ Complete (deployed & verified on NAS) | 2026-05-30 |
-| 2. State Ledger + *arr Adapter + Gap Detection | 2/4 | In progress | - |
+| 2. State Ledger + *arr Adapter + Gap Detection | 4/4 | ✓ Complete | 2026-05-30 |
 | 3. Matching & Quality Gating | 0/0 | Not started | - |
 | 4. Acquisition, Staging & Clean Import | 0/0 | Not started | - |
 | 5. Autonomy, Sharing & Self-Recovery | 0/0 | Not started | - |
