@@ -31,7 +31,12 @@ def connect(db_path: str) -> sqlite3.Connection:
     """
     conn = sqlite3.connect(db_path, isolation_level=None, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL;")      # concurrent readers + one writer
-    conn.execute("PRAGMA synchronous=NORMAL;")    # safe with WAL; good durability/throughput
+    # synchronous=FULL (not NORMAL) for the writer: with WAL, NORMAL can LOSE the last committed
+    # transaction(s) on an OS crash / power loss (DB stays consistent, but a just-written
+    # status='imported' could vanish) — and a lost 'imported' would re-trigger acquisition,
+    # breaking the load-bearing "no redundant downloads" guarantee. This is a low-volume homelab
+    # gap-filler, so the extra fsync-per-commit cost is irrelevant; correctness wins (WR-06).
+    conn.execute("PRAGMA synchronous=FULL;")
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.execute("PRAGMA busy_timeout=5000;")     # wait, don't instantly error, on contention
     conn.row_factory = sqlite3.Row
