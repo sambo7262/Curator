@@ -4,11 +4,11 @@
 
 ## Current Status
 
-**Phase**: 1 - VPN-Routed Networking Foundation
-**Plan**: 4 of 4 (all code-complete)
-**Status**: Artifacts built & committed — awaiting on-NAS deploy + smoke test
-**Last action**: Executed Phase 1 inline — created docker-compose.yml, .env.example, Curator FastAPI stub (+ unit tests), Dockerfile, GitHub Actions CI, smoke-test.sh, NAS-RECON.md, DEPLOY.md. Owner-provided values baked in (synobridge 172.20.0.0/16, PUID/PGID 1031/65536, /volume1/data, PIA CA Vancouver, sambo7262/curator). 4 atomic commits.
-**Next action**: Owner deploys on the NAS via Container Manager (see DEPLOY.md): create .env with PIA creds + genkey, `docker compose up -d`, then `bash scripts/smoke-test.sh` → expect GO. After GO, run `/gsd:plan-phase 2`.
+**Phase**: 1 - VPN-Routed Networking Foundation — ✓ COMPLETE (deployed & verified)
+**Plan**: 4 of 4 complete
+**Status**: Phase 1 verified on live NAS — slskd logged into Soulseek (as "Scooby123987") via PIA Vancouver, port 56034. All 6 INFRA reqs + 4 success criteria PASS. See phase-1/VERIFICATION.md.
+**Last action**: Deployed Curator stack to the DS423+ via Container Manager and passed UAT. Three deploy-time fixes (quote .env spaces/semicolons; smoke-test curl sidecars; add SLSKD_SLSK_USERNAME/PASSWORD) committed + pushed.
+**Next action**: Run `/gsd:plan-phase 2` — State Ledger + *arr Adapter + Gap Detection.
 
 ## Active Phase Detail
 
@@ -26,7 +26,7 @@ Phase 1 delivers the substrate: gluetun (PIA/OpenVPN, kill-switch, port forwardi
 See: .planning/PROJECT.md (updated 2026-05-29)
 
 **Core value:** Anything monitored in Lidarr/Readarr that the Usenet pipeline can't get is acquired automatically — correctly matched, right quality, no redundant downloads, no junk, zero manual interaction.
-**Current focus:** Phase 1 — VPN-Routed Networking Foundation (awaiting NAS deploy)
+**Current focus:** Phase 1 complete ✓ — next is Phase 2 (State Ledger + *arr Adapter + Gap Detection)
 
 ## Notes / Blockers
 
