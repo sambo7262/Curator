@@ -43,7 +43,11 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
   2. Curator detects both monitored missing (wanted/missing) and cutoff-unmet (wanted/cutoff) items from Lidarr through the adapter.
   3. The adapter exposes item identity + quality profile/cutoff uniformly and treats Readarr as a pluggable module — feeding Readarr garbage/empty metadata degrades gracefully (book item skipped, logged) without crashing or stalling the music loop.
   4. Re-running gap detection on an already-tracked or already-satisfied item does not create a duplicate ledger entry (dedup proven).
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 02-01-PLAN.md — Wave 0: offline *arr JSON fixtures + conftest + dev deps, config.py/package markers, /db mount + DB_PATH wiring [STATE-01]
+- [ ] 02-02-PLAN.md — SQLite-WAL ledger: schema (items, UNIQUE dedup, status CHECK) + idempotent migrations + status-preserving upsert repo + startup hook [STATE-01, STATE-02]
+- [ ] 02-03-PLAN.md — *-arr-agnostic adapter seam: ArrAdapter Protocol + GapItem, LidarrAdapter (missing+cutoff), defensive ReadarrAdapter + circuit breaker [ARR-01, ARR-02, GAP-01, GAP-02]
+- [ ] 02-04-PLAN.md — gap_detector wiring: detect_gaps adapters→ledger, end-to-end dedup + Readarr-fault-does-not-gate-music proofs, manual one-shot trigger [GAP-01, GAP-02, STATE-02, ARR-02]
 
 ### Phase 3: Matching & Quality Gating
 **Goal**: Curator decides what is worth grabbing before spending a download: it scores slskd candidates against the item's authoritative identity (artist/album, track-count completeness, edition/year, format; author/title/format for books), reads the `*arr` quality profile/cutoff, filters candidates to profile-acceptable formats/bitrates, applies fake/transcoded-FLAC heuristics, and refuses anything below the confidence threshold — precision over recall.
@@ -93,7 +97,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. VPN-Routed Networking Foundation | 4/4 | ✓ Complete (deployed & verified on NAS) | 2026-05-30 |
-| 2. State Ledger + *arr Adapter + Gap Detection | 0/0 | Not started | - |
+| 2. State Ledger + *arr Adapter + Gap Detection | 0/4 | Planned | - |
 | 3. Matching & Quality Gating | 0/0 | Not started | - |
 | 4. Acquisition, Staging & Clean Import | 0/0 | Not started | - |
 | 5. Autonomy, Sharing & Self-Recovery | 0/0 | Not started | - |
