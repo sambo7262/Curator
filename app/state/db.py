@@ -38,8 +38,34 @@ def connect(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def _split_statements(sql: str) -> List[str]:
+    """Split a migration .sql into individual statements on top-level `;`.
+
+    Strips `--` line comments FIRST (a prose comment may itself contain a `;`, which would
+    otherwise split mid-comment), then splits the remaining DDL on `;`. Sufficient for the
+    Curator migration files, which use no string literals embedding a `;` — so this lets us
+    run each statement inside ONE explicit transaction instead of executescript (which
+    auto-commits and would defeat the wrapping BEGIN).
+    """
+    no_comments = []
+    for line in sql.splitlines():
+        idx = line.find("--")
+        if idx != -1:
+            line = line[:idx]
+        no_comments.append(line)
+    stripped = "\n".join(no_comments)
+    return [stmt.strip() for stmt in stripped.split(";") if stmt.strip()]
+
+
 def run_migrations(conn: sqlite3.Connection) -> None:
     """Apply any migration whose 1-based index exceeds the stored PRAGMA user_version.
+
+    Each migration's DDL AND its user_version bump are committed together in a single
+    explicit transaction (WR-02): if the process dies mid-migration, SQLite rolls the
+    whole thing back, so a partially-applied schema can never coexist with a stale
+    user_version (which would re-run a non-idempotent future migration). We split the
+    .sql and execute statements individually rather than executescript() because the
+    latter issues an implicit COMMIT that would break the wrapping transaction.
 
     Idempotent: re-running on an already-current DB applies nothing and leaves
     user_version unchanged (STATE-01 self-healing schema reconcile).
@@ -47,6 +73,13 @@ def run_migrations(conn: sqlite3.Connection) -> None:
     have = conn.execute("PRAGMA user_version;").fetchone()[0]
     for i, (_, sql) in enumerate(MIGRATIONS, start=1):
         if i > have:
-            conn.executescript(sql)
-            # The ONLY permitted f-string-into-SQL: `i` is a loop-controlled int, never user input.
-            conn.execute(f"PRAGMA user_version = {i};")
+            conn.execute("BEGIN;")
+            try:
+                for stmt in _split_statements(sql):
+                    conn.execute(stmt)
+                # The ONLY permitted f-string-into-SQL: `i` is a loop-controlled int, never user input.
+                conn.execute(f"PRAGMA user_version = {i};")
+                conn.execute("COMMIT;")
+            except Exception:
+                conn.execute("ROLLBACK;")
+                raise

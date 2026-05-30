@@ -110,3 +110,40 @@ def test_migrations_idempotent(tmp_db_path):
     assert version_after_first == version_after_second
     assert version_after_first >= 1
     conn.close()
+
+
+def test_migration_and_version_bump_commit_together(tmp_db_path, monkeypatch):
+    """WR-02: a migration's DDL and its user_version bump must commit ATOMICALLY. If ANY statement
+    in the migration fails, the WHOLE migration (DDL + version bump) rolls back — no half-applied
+    schema can coexist with a stale user_version (which would re-run a non-idempotent migration)."""
+    import state.db as db
+
+    # A self-contained migration that creates a table then issues an invalid statement, so the
+    # transaction fails AFTER some DDL has run — exactly the crash WR-02 must survive.
+    bad_migration = (
+        "9999",
+        "CREATE TABLE migration_probe (x INTEGER);\n"
+        "THIS IS NOT VALID SQL;",
+    )
+    monkeypatch.setattr(db, "MIGRATIONS", [bad_migration], raising=True)
+
+    conn = connect(tmp_db_path)
+    with pytest.raises(sqlite3.OperationalError):
+        run_migrations(conn)
+
+    # Rolled back atomically: neither the probe table nor a version bump survived.
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='migration_probe'"
+    ).fetchall() == []
+    conn.close()
+
+    # Restore the real MIGRATIONS and confirm a clean run applies fully + atomically.
+    monkeypatch.undo()
+    conn2 = connect(tmp_db_path)
+    run_migrations(conn2)
+    assert conn2.execute("PRAGMA user_version;").fetchone()[0] >= 1
+    assert conn2.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='items'"
+    ).fetchall() != []
+    conn2.close()
