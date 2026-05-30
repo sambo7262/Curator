@@ -48,6 +48,15 @@ def test_garbage_skips_and_logs(httpx_client, caplog):
                for r in caplog.records)
 
 
+def test_missing_api_key_raises(httpx_client):
+    """CR-01: a None/empty READARR_API_KEY raises at construction (the caller catches this to skip
+    Readarr) rather than building {"X-Api-Key": None} and failing opaquely on first request."""
+    import pytest
+    for bad in (None, ""):
+        with pytest.raises(ValueError, match="READARR_API_KEY"):
+            ReadarrAdapter("http://test-arr", bad, httpx_client({}))
+
+
 def test_5xx_returns_empty():
     """ARR-02: a 5xx from Readarr is swallowed in _paged -> get_wanted() == [] (music unaffected)."""
     def _handler(request: httpx.Request) -> httpx.Response:

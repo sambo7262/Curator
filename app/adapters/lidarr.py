@@ -22,6 +22,11 @@ class LidarrAdapter:
     app = "lidarr"
 
     def __init__(self, base_url: str, api_key: str, client: httpx.Client):
+        # Fail fast: a None/empty key would otherwise produce {"X-Api-Key": None}, which httpx
+        # rejects with an opaque header-encoding TypeError on the first request. Lidarr is the
+        # PRIMARY (music) path, so a missing key is a hard, clearly-reported error (CR-01).
+        if not api_key:
+            raise ValueError("LIDARR_API_KEY is required (music is the primary path)")
         self._base = base_url.rstrip("/")
         self._client = client
         self._headers = {"X-Api-Key": api_key}   # [VERIFIED: Servarr v1 auth header]

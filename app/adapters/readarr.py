@@ -26,6 +26,11 @@ class ReadarrAdapter:
     app = "readarr"
 
     def __init__(self, base_url: str, api_key: str, client: httpx.Client):
+        # A None/empty key would yield {"X-Api-Key": None} and an opaque httpx header error on the
+        # first request. Readarr is BEST-EFFORT: rather than crash, the caller (build_adapters)
+        # treats a missing key as "Readarr disabled" and skips it, honouring ARR-02 (CR-01).
+        if not api_key:
+            raise ValueError("READARR_API_KEY is not set")
         self._base = base_url.rstrip("/")
         self._client = client
         self._headers = {"X-Api-Key": api_key}   # [VERIFIED: Servarr v1 auth header]

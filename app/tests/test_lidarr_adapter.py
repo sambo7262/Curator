@@ -84,6 +84,15 @@ def test_paging_terminates_on_malformed_envelope():
     assert calls["n"] < 10
 
 
+def test_missing_api_key_fails_fast(httpx_client):
+    """CR-01: a None/empty LIDARR_API_KEY must raise a clear error at construction, NOT defer to an
+    opaque httpx header-encoding TypeError on the first request (Lidarr is the primary path)."""
+    import pytest
+    for bad in (None, ""):
+        with pytest.raises(ValueError, match="LIDARR_API_KEY"):
+            LidarrAdapter("http://test-arr", bad, httpx_client({}))
+
+
 def test_lidarr_satisfies_protocol(httpx_client):
     """ARR-01: a LidarrAdapter exposes the Phase-2 ArrAdapter surface (app + callable get_wanted).
 
