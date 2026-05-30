@@ -4,7 +4,7 @@
 services:
   # ─────────────────────────────── VPN tunnel (PIA via OpenVPN) ───────────────────────────────
   gluetun:
-    image: qmcgaw/gluetun:v3.41.1        # pin @sha256 once captured on the NAS
+    image: qmcgaw/gluetun:v3.41.1@sha256:2f33c71e5e164fcd51a962cb950134df25155593edf0c3e1201f888d027049b4  # amd64 digest pinned 2026-05-30
     container_name: gluetun
     cap_add: [NET_ADMIN]
     devices:
@@ -35,7 +35,7 @@ services:
 
   # ─────────────────────────────── Soulseek daemon ───────────────────────────────
   slskd:
-    image: slskd/slskd:0.25.1            # pin @sha256 once captured on the NAS; >=0.24.4 needed for native PF
+    image: slskd/slskd:0.25.1@sha256:4fe0c6f628efaa9218bf2fa5cc779cac4fe261e74ff617514587af1dc36c8d54  # amd64 digest pinned 2026-05-30 (>=0.24.4 needed for native PF)
     container_name: slskd
     network_mode: "service:gluetun"      # share VPN netns — NO ports/networks here (they live on gluetun)
     user: "${PUID}:${PGID}"              # slskd uses the `user:` directive, NOT PUID/PGID env vars

@@ -34,9 +34,9 @@ value wins.
 - [ ] Generate the gluetun control-server API key: `docker run --rm qmcgaw/gluetun genkey`
       → put it in `.env` as BOTH `GLUETUN_API_KEY` (it's referenced by gluetun and slskd).
 - [ ] Generate an slskd API key (format `role=...;cidr=...;<16-255 char secret>`) → `.env` `SLSKD_API_KEY`.
-- [ ] (Optional, recommended) capture amd64 digests and pin `@sha256` in compose:
-      `curl -s https://hub.docker.com/v2/repositories/qmcgaw/gluetun/tags/v3.41.1` /
-      `.../slskd/slskd/tags/0.25.1` → filter `architecture==amd64`.
+- [x] amd64 digests captured and pinned in compose (2026-05-30, verified via `docker manifest inspect`):
+      - gluetun `v3.41.1@sha256:2f33c71e5e164fcd51a962cb950134df25155593edf0c3e1201f888d027049b4`
+      - slskd `0.25.1@sha256:4fe0c6f628efaa9218bf2fa5cc779cac4fe261e74ff617514587af1dc36c8d54`
 
 ## Hardlink / INFRA-06 note
 `/volume1/data:/data` is a single tree mounted identically into slskd, curator, and the *arr →
