@@ -19,7 +19,7 @@ the authoritative green gate is Python 3.12 at CI/NAS.
 """
 from adapters.base import GapItem
 from adapters.breaker import CircuitBreaker
-from core.gap_detector import detect_gaps
+from core.gap_detector import build_adapters, detect_gaps
 from state.db import connect, run_migrations
 from state.repo import get_gap, set_status
 
@@ -132,6 +132,48 @@ def test_dedup_preserves_status_end_to_end(tmp_db_path):
     assert get_gap(conn, "lidarr", "1")["status"] == "imported"  # NOT clobbered to 'pending'
     assert get_gap(conn, "lidarr", "2")["status"] == "pending"
     conn.close()
+
+
+def test_build_adapters_returns_closable_clients(monkeypatch):
+    """CR-02: build_adapters hands back the httpx clients it created so the caller can close them
+    (no leaked sockets/FDs). With both keys set, two adapters + two clients come back."""
+    import config
+    from config import Settings
+
+    monkeypatch.setattr(config, "settings", Settings.from_env(), raising=True)
+    monkeypatch.setenv("LIDARR_API_KEY", "lk")
+    monkeypatch.setenv("READARR_API_KEY", "rk")
+    monkeypatch.setattr(config, "settings", Settings.from_env(), raising=True)
+
+    adapters, clients = build_adapters()
+    try:
+        assert [a.app for a in adapters] == ["lidarr", "readarr"]
+        assert len(clients) == 2
+    finally:
+        for c in clients:
+            c.close()
+        # closing must be idempotent-safe and not error on already-built clients
+        assert all(c.is_closed for c in clients)
+
+
+def test_build_adapters_skips_readarr_without_key(monkeypatch):
+    """CR-01/ARR-02: a missing READARR_API_KEY disables Readarr (music-only) rather than crashing,
+    and the discarded Readarr client is closed so nothing leaks."""
+    import config
+    from config import Settings
+
+    monkeypatch.setenv("LIDARR_API_KEY", "lk")
+    monkeypatch.delenv("READARR_API_KEY", raising=False)
+    monkeypatch.setattr(config, "settings", Settings.from_env(), raising=True)
+
+    adapters, clients = build_adapters()
+    try:
+        assert [a.app for a in adapters] == ["lidarr"]   # Readarr skipped, music path intact
+        # the Readarr client was created-then-closed; only the live Lidarr client remains tracked
+        assert len(clients) == 1
+    finally:
+        for c in clients:
+            c.close()
 
 
 def test_readarr_fault_does_not_gate_music(tmp_db_path):

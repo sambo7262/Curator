@@ -10,11 +10,14 @@
 #
 # The __main__ block is a one-shot MANUAL trigger for on-NAS UAT only. It is deliberately NOT a
 # scheduled loop or daemon — periodic scheduling is Phase 5.
+import logging
 import sqlite3
-from typing import Dict, List
+from typing import Any, Dict, List, Tuple
 
 from adapters.base import ArrAdapter, GapItem  # noqa: F401  (Protocol + model — the firewall's whole vocabulary)
 from state import repo
+
+log = logging.getLogger(__name__)
 
 
 def detect_gaps(adapters: List[ArrAdapter], conn: sqlite3.Connection) -> Dict[str, int]:
@@ -36,12 +39,17 @@ def detect_gaps(adapters: List[ArrAdapter], conn: sqlite3.Connection) -> Dict[st
     return counts
 
 
-def build_adapters() -> List[ArrAdapter]:
-    """Construct the live adapter list — Lidarr first (primary), Readarr second (best-effort).
+def build_adapters() -> Tuple[List[ArrAdapter], List[Any]]:
+    """Construct the live adapter list and the httpx clients backing it.
 
-    Lidarr is used directly (hard faults surface — it is the primary path); Readarr is wrapped in
-    the CircuitBreaker so a fault degrades to [] instead of gating music. Imported lazily so this
-    module parses/imports even where httpx is absent (the offline Python-3.9 dev sandbox).
+    Lidarr first (primary, used directly — hard faults surface); Readarr second (best-effort,
+    CircuitBreaker-wrapped so a fault degrades to [] instead of gating music). A missing
+    READARR_API_KEY disables Readarr gracefully (skip it) rather than crashing — music is never
+    gated by a book-side misconfiguration (ARR-02 / CR-01).
+
+    Returns (adapters, clients): the caller OWNS the clients and MUST close every one (each
+    httpx.Client holds a connection pool / sockets) — see the __main__ try/finally below (CR-02).
+    Imported lazily so this module parses/imports even where httpx is absent (offline 3.9 sandbox).
     """
     import httpx
 
@@ -50,11 +58,25 @@ def build_adapters() -> List[ArrAdapter]:
     from adapters.readarr import ReadarrAdapter
     from config import settings
 
-    lidarr = LidarrAdapter(settings.lidarr_url, settings.lidarr_api_key, httpx.Client())
-    readarr = CircuitBreaker(
-        ReadarrAdapter(settings.readarr_url, settings.readarr_api_key, httpx.Client())
-    )
-    return [lidarr, readarr]
+    adapters: List[ArrAdapter] = []
+    clients: List[Any] = []
+
+    lidarr_client = httpx.Client()
+    clients.append(lidarr_client)
+    adapters.append(LidarrAdapter(settings.lidarr_url, settings.lidarr_api_key, lidarr_client))
+
+    # Readarr is best-effort: a missing key (or any construction error) disables it, it never
+    # crashes the primary music path. The client is created first and closed if construction fails.
+    readarr_client = httpx.Client()
+    try:
+        readarr = ReadarrAdapter(settings.readarr_url, settings.readarr_api_key, readarr_client)
+        clients.append(readarr_client)
+        adapters.append(CircuitBreaker(readarr))
+    except ValueError as e:   # e.g. READARR_API_KEY unset -> skip Readarr (ARR-02 graceful degrade)
+        readarr_client.close()
+        log.warning("Readarr disabled (%s); continuing music-only", e)
+
+    return adapters, clients
 
 
 if __name__ == "__main__":
@@ -65,5 +87,12 @@ if __name__ == "__main__":
 
     _conn = connect(settings.db_path)
     run_migrations(_conn)
-    _counts = detect_gaps(build_adapters(), _conn)
-    print("gap detection complete:", _counts)
+    _adapters, _clients = build_adapters()
+    try:
+        _counts = detect_gaps(_adapters, _conn)
+        print("gap detection complete:", _counts)
+    finally:
+        # Own the client lifecycle — close every httpx.Client so the one-shot leaks no sockets (CR-02).
+        for _c in _clients:
+            _c.close()
+        _conn.close()
