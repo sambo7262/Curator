@@ -14,7 +14,7 @@ import logging
 import sqlite3
 from typing import Any, Dict, List, Tuple
 
-from adapters.base import ArrAdapter, GapItem  # noqa: F401  (Protocol + model — the firewall's whole vocabulary)
+from adapters.base import ArrAdapter  # the Protocol the core depends on (the firewall's interface)
 from state import repo
 
 log = logging.getLogger(__name__)
