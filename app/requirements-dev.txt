@@ -1,5 +1,5 @@
 # Curator dev/test-only dependencies — NOT installed into the runtime image.
 # respx mocks httpx so adapter tests run fully offline (no live Lidarr/Readarr).
-# Versions to confirm on first CI build (network present there) — see blocking checkpoint.
+# Versions human-approved as pinned (Phase 2 package-legitimacy checkpoint, 2026-05-30).
 pytest
-respx==0.22.0        # httpx MockTransport backend; pins to an httpx range — verify compat with httpx 0.28.x.
+respx==0.22.0        # lundberg/respx — httpx MockTransport backend; approved compatible with httpx 0.28.x.
