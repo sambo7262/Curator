@@ -16,9 +16,13 @@
   pushes `sambo7262/curator` via `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` repo secrets (already set).
 
 ## Verification
-- `pytest app/tests` → **3 passed** (run locally in a clean venv).
-- Workflow YAML targets `linux/amd64`; no `setup-qemu`.
-- CI build green + Docker Hub push confirmed on first push to main; `docker history` secret scan
-  in smoke-test (3e).
+- 3 tests authored (healthz, readyz shape, readyz reflects SLSKD_URL env). **NOT run in the dev
+  sandbox** — local env is Python 3.9 + offline pip (no `httpx` for Starlette TestClient). Tests
+  will run on the NAS or in a proper venv (`pip install -r app/requirements.txt httpx pytest`).
+  Note: `httpx`+`pytest` are test-only deps, intentionally not in `requirements.txt` (kept out of
+  the runtime image); install them separately to run the suite.
+- Workflow YAML validated: targets `linux/amd64`, no `setup-qemu` (confirmed via YAML parse).
+- CI build green + Docker Hub push to be confirmed on first push to main; `docker history` secret
+  scan in smoke-test (3e).
 
 ## Self-Check: PASSED

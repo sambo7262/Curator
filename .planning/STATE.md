@@ -1,90 +1,37 @@
-# Project State: Curator
+# Project State
 
-**Last updated:** 2026-05-29
-**Current phase:** Phase 1: VPN-Routed Networking Foundation
-**Status:** Not started
+<!-- GSD reads this file first to understand where the project is. Keep it current. -->
+
+## Current Status
+
+**Phase**: 1 - VPN-Routed Networking Foundation
+**Plan**: 4 of 4 (all code-complete)
+**Status**: Artifacts built & committed — awaiting on-NAS deploy + smoke test
+**Last action**: Executed Phase 1 inline — created docker-compose.yml, .env.example, Curator FastAPI stub (+ unit tests), Dockerfile, GitHub Actions CI, smoke-test.sh, NAS-RECON.md, DEPLOY.md. Owner-provided values baked in (synobridge 172.20.0.0/16, PUID/PGID 1031/65536, /volume1/data, PIA CA Vancouver, sambo7262/curator). 4 atomic commits.
+**Next action**: Owner deploys on the NAS via Container Manager (see DEPLOY.md): create .env with PIA creds + genkey, `docker compose up -d`, then `bash scripts/smoke-test.sh` → expect GO. After GO, run `/gsd:plan-phase 2`.
+
+## Active Phase Detail
+
+Phase 1 delivers the substrate: gluetun (PIA/OpenVPN, kill-switch, port forwarding, control-server auth) + slskd (shared netns, native PF sync, user 1031:65536) + Curator FastAPI health stub, all from one compose pulling a CI-built Docker Hub image, with a single identical /volume1/data mount for atomic hardlinks. All six INFRA requirements (01-06) addressed in code; final proof is the on-NAS Go/No-Go smoke test (criteria that need live VPN/NAS were NOT runnable in the dev sandbox).
+
+## Recent Decisions
+
+- **PIA region = CA Vancouver** — west-coast PF-capable (US has zero port forwarding; latency was the owner's concern but PF is mandatory for slskd).
+- **Inline execution** of Phase 1 (not worktree subagents) — all owner-provided values were in context and 01-02/01-04 share docker-compose.yml; faster and conflict-free.
+- **Owner deploys manually** in Container Manager (not auto-SSH) — DEPLOY.md is the handoff.
+- **slskd-direct, not Soularr**; **v1 = music + books (Readarr best-effort)**; **staging→Manual-Import→auto-purge** cleanup (the 6th pain point).
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-05-29)
 
-**Core value:** Anything already monitored in Lidarr (music) or Readarr (books) that the Usenet pipeline can't get is acquired automatically — correctly matched, at the right quality, with no redundant downloads, no leftover junk on the volume, and zero manual interaction.
-**Current focus:** Stand up the gluetun+PIA / slskd / shared-`/data` networking foundation and the CI/compose deploy loop — the highest-risk layer that gates everything else.
+**Core value:** Anything monitored in Lidarr/Readarr that the Usenet pipeline can't get is acquired automatically — correctly matched, right quality, no redundant downloads, no junk, zero manual interaction.
+**Current focus:** Phase 1 — VPN-Routed Networking Foundation (awaiting NAS deploy)
 
-## Current Position
+## Notes / Blockers
 
-Phase: 1 of 6 (VPN-Routed Networking Foundation)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-05-29 — Corrected roadmap created (horizontal layers, music + books scope)
-
-Progress: [░░░░░░░░░░] 0%
-
-Roadmap (6 horizontal layers, all 34 v1 requirements mapped):
-1. **VPN-Routed Networking Foundation** ← next
-2. State Ledger + *arr Adapter + Gap Detection
-3. Matching & Quality Gating
-4. Acquisition, Staging & Clean Import
-5. Autonomy, Sharing & Self-Recovery
-6. Observability & Notifications
-
-Build bottom-up so the riskiest infra surfaces failures first; the state ledger is laid before the source engine (the spine that prevents the prior redundant-download pain). Value lands when the full acquire→stage→import→purge loop closes in Phase 4 and becomes hands-off in Phase 5. Next step: `/gsd:plan-phase 1`.
-
-## Performance Metrics
-
-**Velocity:**
-- Total plans completed: 0
-- Average duration: —
-- Total execution time: 0 hours
-
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| - | - | - | - |
-
-**Recent Trend:**
-- Last 5 plans: none yet
-- Trend: n/a
-
-*Updated after each plan completion*
-
-## Accumulated Context
-
-### Decisions
-
-Full log in PROJECT.md Key Decisions. Recent decisions affecting current work:
-
-- **Mode:** Horizontal Layers (standard granularity, yolo, parallelization on) — build complete technical layers and assemble; value lands when the loop closes.
-- **Scope correction (supersedes earlier MVP/music-only run):** v1 = MUSIC (Lidarr, primary) + BOOKS (Readarr, best-effort, behind a `*-arr`-agnostic adapter so Readarr's retired status can't break music). slskd-DIRECT (no Soularr). Import & Cleanup is a first-class layer: download into isolated per-item staging/quarantine → import ONLY wanted files via `*arr` Manual Import → verify → AUTO-PURGE staging (owner's 6th pain: no leftover junk, no manual deletion). Spectral-FLAC is OUT of v1 (heuristic checks only).
-- **Networking (verified):** gluetun on synobridge publishes slskd's ports; slskd `network_mode: service:gluetun`. Curator reaches slskd at `http://gluetun:5030`, NEVER `http://slskd` (#1 misconfig). slskd ≥0.24.4 has NATIVE gluetun PF — do NOT build port-sync. gluetun ctrl server (~v3.40+) needs an apikey, matched in `SLSKD_VPN_GLUETUN_API_KEY`. PIA PF = NON-US region only; bind-mount `/gluetun` (60-day port). `FIREWALL_OUTBOUND_SUBNETS` must include synobridge+LAN; kill-switch ON. Single identical `/data` tree across all four containers → atomic hardlinks; consistent PUID/PGID + umask 002.
-- **Stack:** Python 3.12, httpx + pyarr + slskd-api, APScheduler, SQLModel/SQLite WAL, FastAPI :8674, Apprise. Pin slskd 0.25.1, gluetun v3.x dated tag.
-- Quality defers entirely to `*arr` profiles; matching is precision-over-recall. Infra outages classified separately — never burn a per-item attempt.
-
-### Pending Todos
-
-None yet.
-
-### Blockers/Concerns
-
-Verify-live before/within the relevant phase (research open questions):
-- [Phase 1] Exact `SLSKD_VPN_*` var casing + control-server apikey key name; gluetun `config.toml` role/apikey shape; current PF-capable PIA region list.
-- [Phase 1] Existing `*arr` mount convention on this Synology — dictates the `/data` layout (settle before the importer).
-- [Phase 2/4] Lidarr/Readarr v1 endpoint/command + ManualImport payload shape vs live `/swagger`.
-- [Phase 5] Hands-off is a testable success criterion (SC5): N days, zero manual actions, gaps still fill.
-
-## Deferred Items
-
-| Category | Item | Status | Deferred At |
-|----------|------|--------|-------------|
-| Quality | QUAL-04 spectral/frequency-cutoff FLAC analysis | v2 | 2026-05-29 (init) |
-| Sources | SRC-01 pluggable second source backend | v2 | 2026-05-29 (init) |
-
-## Session Continuity
-
-Last session: 2026-05-29
-Stopped at: Corrected ROADMAP.md + REQUIREMENTS.md traceability + this STATE.md written. Books ride the same layers behind the adapter — enable best-effort only after the music loop is hands-off; never let books gate music.
-Resume file: None — run `/gsd:plan-phase 1`
-
----
-*State initialized: 2026-05-29 after corrected roadmap creation*
+- **Unverified locally:** the dev sandbox has Python 3.9 + no network (offline pip), so `pytest` for the Curator stub was NOT run here. YAML structure for compose + CI workflow WAS validated (3 services, slskd has no ports/networks, single external net, CI targets linux/amd64). Tests + full smoke run execute on the NAS / in CI.
+- Config: YOLO, standard granularity, parallel, quality models, research + plan-check on, verifier off, docs committed.
+- Phase 1 NAS deploy needs from owner: `.env` with PIA_USER/PIA_PASSWORD, `GLUETUN_API_KEY` (genkey), `SLSKD_API_KEY`, LIDARR/READARR API keys. Everything else pre-filled.
+- Deploy-time TODO (optional but recommended): pin gluetun/slskd `@sha256` digests in compose.
+- Owner environment in memory: synobridge 172.20.0.0/16 (gw .1), PUID/PGID 1031/65536, /volume1/data, lidarr:8686, readarr:8787, curator:8674 (LAN/Tailscale-only firewall rule).
