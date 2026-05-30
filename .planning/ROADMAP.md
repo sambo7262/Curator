@@ -28,7 +28,11 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
   2. gluetun (non-US PF region) obtains a forwarded port and slskd self-applies it as its Soulseek listen port — re-syncing automatically after a container/NAS restart (verified, not just on first boot).
   3. Curator on `synobridge` reaches Lidarr/Readarr/Plex by container name AND slskd via `http://gluetun:5030` (FIREWALL_OUTBOUND_SUBNETS confirmed correct); a `git push` builds and pushes a `linux/amd64` image to Docker Hub with no secrets baked in.
   4. `docker compose up` from one YAML brings the stack online with config/state/downloads on `/volume1`, and a file written by slskd into the shared `/data` tree is hardlink-capable (not a cross-FS copy) and readable/movable by the `*arr` PUID/PGID.
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 01-01-PLAN.md — Wave 0 NAS recon (CIDR/PUID-PGID/*arr-mount/hardlink/tun) + secrets bootstrap (.env.example/.gitignore) + image digests + gluetun API key [INFRA-06]
+- [ ] 01-02-PLAN.md — gluetun+slskd VPN stack: PIA OpenVPN, kill-switch, control-server auth, native PF auto-sync; egress/fail-closed/PF-restart smoke [INFRA-01, INFRA-02, INFRA-03]
+- [ ] 01-03-PLAN.md — Curator FastAPI health/status stub + Dockerfile + GitHub Actions linux/amd64 -> Docker Hub (no baked secrets) [INFRA-05]
+- [ ] 01-04-PLAN.md — single-compose assembly (curator + synobridge) + runnable smoke-test.sh + Go/No-Go gate [INFRA-03, INFRA-04, INFRA-06]
 
 ### Phase 2: State Ledger + *arr Adapter + Gap Detection
 **Goal**: The persistent spine and the integration seam exist before any acquisition: a SQLite (WAL) ledger is the source of truth for "should I act on this gap?", and a `*-arr`-agnostic adapter detects monitored missing and cutoff-unmet items from Lidarr (and, behind the same isolated interface, Readarr) and upserts them deduped — so the same gap is never tracked twice and Readarr's quirks can't reach the core.
@@ -88,7 +92,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. VPN-Routed Networking Foundation | 0/0 | Not started | - |
+| 1. VPN-Routed Networking Foundation | 0/4 | Planned | - |
 | 2. State Ledger + *arr Adapter + Gap Detection | 0/0 | Not started | - |
 | 3. Matching & Quality Gating | 0/0 | Not started | - |
 | 4. Acquisition, Staging & Clean Import | 0/0 | Not started | - |
