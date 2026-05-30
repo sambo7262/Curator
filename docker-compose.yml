@@ -48,7 +48,10 @@ services:
       SLSKD_VPN_PORT_FORWARDING: "true"
       SLSKD_VPN_GLUETUN_URL: "http://localhost:8000"   # control server is in the SAME netns → localhost
       SLSKD_VPN_GLUETUN_API_KEY: "${GLUETUN_API_KEY}"  # MUST equal gluetun's apikey (else 401)
-      SLSKD_API_KEY: "${SLSKD_API_KEY}"   # slskd's own API key (Curator uses it from Phase 2)
+      SLSKD_API_KEY: "${SLSKD_API_KEY}"   # slskd's own REST API key (Curator uses it from Phase 2)
+      # --- Soulseek NETWORK account (slskd logs into Soulseek with these — separate from everything above) ---
+      SLSKD_SLSK_USERNAME: "${SLSKD_SLSK_USERNAME}"   # pick any username; new ones auto-register on first connect
+      SLSKD_SLSK_PASSWORD: "${SLSKD_SLSK_PASSWORD}"
       SLSKD_UMASK: "002"                  # group-writable so the *arr (same GID) can import
       # Do NOT set SLSKD_SLSK_LISTEN_PORT — native PF sets the Soulseek port dynamically.
       TZ: "${TZ}"
