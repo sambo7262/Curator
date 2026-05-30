@@ -1,0 +1,22 @@
+{
+  "page": 2,
+  "pageSize": 2,
+  "sortKey": "releaseDate",
+  "sortDirection": "ascending",
+  "totalRecords": 3,
+  "records": [
+    {
+      "id": 203,
+      "foreignAlbumId": "c0ff0011-3333-4ccc-aaaa-000000000203",
+      "artistId": 23,
+      "title": "Rumours",
+      "releaseDate": "1977-02-04T00:00:00Z",
+      "monitored": true,
+      "anyReleaseOk": false,
+      "profileId": 1,
+      "artist": {
+        "artistName": "Fleetwood Mac"
+      }
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "page": 1,
+  "pageSize": 100,
+  "sortKey": "releaseDate",
+  "sortDirection": "ascending",
+  "totalRecords": 4,
+  "records": [
+    {
+      "id": 401,
+      "authorId": 41,
+      "title": "The Left Hand of Darkness",
+      "monitored": true,
+      "foreignBookId": "OL453016W",
+      "qualityProfileId": 1,
+      "author": {
+        "authorName": "Ursula K. Le Guin"
+      }
+    },
+    {
+      "authorId": 42,
+      "title": "Record With No Id",
+      "monitored": true,
+      "foreignBookId": "OL000000W",
+      "qualityProfileId": 1,
+      "author": {
+        "authorName": "Nobody"
+      }
+    },
+    "this-record-is-not-a-dict",
+    {
+      "id": 404,
+      "authorId": 44,
+      "title": null,
+      "monitored": true,
+      "foreignBookId": null,
+      "qualityProfileId": null,
+      "author": null
+    }
+  ]
+}

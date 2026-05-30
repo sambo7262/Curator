@@ -1,0 +1,37 @@
+{
+  "page": 1,
+  "pageSize": 100,
+  "sortKey": "releaseDate",
+  "sortDirection": "ascending",
+  "totalRecords": 2,
+  "records": [
+    {
+      "id": 101,
+      "foreignAlbumId": "f3a2b1c4-1111-4aaa-bbbb-000000000001",
+      "artistId": 11,
+      "title": "Kid A",
+      "releaseDate": "2000-10-02T00:00:00Z",
+      "monitored": true,
+      "anyReleaseOk": true,
+      "profileId": 1,
+      "artist": {
+        "artistName": "Radiohead",
+        "foreignArtistId": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+      }
+    },
+    {
+      "id": 102,
+      "foreignAlbumId": "f3a2b1c4-2222-4aaa-bbbb-000000000002",
+      "artistId": 12,
+      "title": "In Rainbows",
+      "releaseDate": "2007-10-10T00:00:00Z",
+      "monitored": true,
+      "anyReleaseOk": true,
+      "profileId": 2,
+      "artist": {
+        "artistName": "Radiohead",
+        "foreignArtistId": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+      }
+    }
+  ]
+}

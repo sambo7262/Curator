@@ -1,0 +1,35 @@
+{
+  "page": 1,
+  "pageSize": 2,
+  "sortKey": "releaseDate",
+  "sortDirection": "ascending",
+  "totalRecords": 3,
+  "records": [
+    {
+      "id": 201,
+      "foreignAlbumId": "c0ff0011-1111-4ccc-aaaa-000000000201",
+      "artistId": 21,
+      "title": "OK Computer",
+      "releaseDate": "1997-05-21T00:00:00Z",
+      "monitored": true,
+      "anyReleaseOk": false,
+      "profileId": 1,
+      "artist": {
+        "artistName": "Radiohead"
+      }
+    },
+    {
+      "id": 202,
+      "foreignAlbumId": "c0ff0011-2222-4ccc-aaaa-000000000202",
+      "artistId": 22,
+      "title": "Blue",
+      "releaseDate": "1971-06-22T00:00:00Z",
+      "monitored": true,
+      "anyReleaseOk": false,
+      "profileId": 3,
+      "artist": {
+        "artistName": "Joni Mitchell"
+      }
+    }
+  ]
+}

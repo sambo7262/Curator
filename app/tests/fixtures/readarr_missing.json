@@ -1,0 +1,31 @@
+{
+  "page": 1,
+  "pageSize": 100,
+  "sortKey": "releaseDate",
+  "sortDirection": "ascending",
+  "totalRecords": 2,
+  "records": [
+    {
+      "id": 301,
+      "authorId": 31,
+      "title": "Dune",
+      "monitored": true,
+      "foreignBookId": "OL45883W",
+      "qualityProfileId": 1,
+      "author": {
+        "authorName": "Frank Herbert"
+      }
+    },
+    {
+      "id": 302,
+      "authorId": 32,
+      "title": "Neuromancer",
+      "monitored": true,
+      "foreignBookId": "OL10380257W",
+      "qualityProfileId": 2,
+      "author": {
+        "authorName": "William Gibson"
+      }
+    }
+  ]
+}
