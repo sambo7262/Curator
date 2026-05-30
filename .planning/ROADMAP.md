@@ -10,7 +10,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 
 ## Phases
 
-- [ ] **Phase 1: VPN-Routed Networking Foundation** - gluetun+PIA tunnel (kill-switch, non-US PF, firewall subnets), slskd routed through it and reachable on synobridge, single shared `/data` mount, deployed from compose pulling a CI-built image
+- [~] **Phase 1: VPN-Routed Networking Foundation** - gluetun+PIA tunnel (kill-switch, non-US PF, firewall subnets), slskd routed through it and reachable on synobridge, single shared `/data` mount, deployed from compose pulling a CI-built image *(artifacts built + committed; NAS deploy + smoke test pending)*
 - [ ] **Phase 2: State Ledger + *arr Adapter + Gap Detection** - SQLite spine plus a `*-arr`-agnostic adapter that detects monitored missing/cutoff gaps and dedups them, with Readarr isolated behind the seam
 - [ ] **Phase 3: Matching & Quality Gating** - candidates scored against authoritative identity and filtered by `*arr` profile/cutoff (incl. fake-FLAC heuristics), rejecting wrong/low-quality matches before any download
 - [ ] **Phase 4: Acquisition, Staging & Clean Import** - eligible gaps are searched, downloaded into an isolated quarantine dir, imported (wanted files only) via Manual Import, verified into the library + Plex, then the staging dir is auto-purged
