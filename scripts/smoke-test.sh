@@ -3,6 +3,8 @@
 # Maps 1:1 to the four ROADMAP Phase-1 success criteria. Exits non-zero on any hard NO-GO.
 set -uo pipefail
 
+# Load .env. Values with spaces or `;` (PIA_PF_REGION, SLSKD_API_KEY) MUST be quoted in .env
+# (the template quotes them) so this shell-source parses them correctly.
 # shellcheck disable=SC1091
 [ -f .env ] && set -a && . ./.env && set +a
 
