@@ -38,8 +38,8 @@ def _shutdown() -> None:
 
 @app.get("/healthz")
 def healthz():
-    """Liveness — the process is up."""
-    return {"status": "ok", "phase": 1}
+    """Liveness — the process is up. `phase` reflects the running build (IN-01: was stale '1')."""
+    return {"status": "ok", "phase": 2, "version": app.version}
 
 
 @app.get("/readyz")

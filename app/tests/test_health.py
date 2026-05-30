@@ -12,7 +12,10 @@ client = TestClient(app)
 def test_healthz_returns_ok():
     resp = client.get("/healthz")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok", "phase": 1}
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["phase"] == 2                      # IN-01: reflects the running phase, not stale 1
+    assert body["version"] == "0.2.0-phase2"
 
 
 def test_readyz_shape():
