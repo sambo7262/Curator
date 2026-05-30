@@ -71,9 +71,13 @@ class ReadarrAdapter:
                 if not batch or page * page_size >= body.get("totalRecords", 0):
                     break
                 page += 1
-        except (httpx.HTTPError, ValueError, TypeError, KeyError) as e:
-            # httpx.HTTPError covers 4xx/5xx (raise_for_status), timeouts, transport errors;
-            # ValueError covers a non-JSON body; never let a Readarr fault reach the core.
+        except (httpx.HTTPError, ValueError, TypeError) as e:
+            # Precisely which call raises each caught type (WR-05 — KeyError dropped, the loop
+            # uses only .get() so no subscript can raise it):
+            #   httpx.HTTPError -> raise_for_status() 4xx/5xx, timeouts, transport errors;
+            #   ValueError      -> r.json() on a non-JSON body (json.JSONDecodeError subclasses it);
+            #   TypeError       -> arithmetic on a non-numeric pageSize/totalRecords in the cutoff.
+            # Intent is "any Readarr-shape fault -> []", never let one reach the core (ARR-02).
             log.warning("readarr _paged(%s) swallowed fault -> []: %s", path, e)
             return []
         return records
