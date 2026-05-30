@@ -75,11 +75,13 @@ services:
       LIDARR_API_KEY: "${LIDARR_API_KEY}"
       READARR_URL: "http://readarr:8787"   # books adapter lands in Phase 2/3; wired here for reachability
       READARR_API_KEY: "${READARR_API_KEY}"
+      DB_PATH: "/db/curator.sqlite"        # SQLite-WAL ledger on its OWN mount (NOT under /data) — Phase 2 (STATE-01)
       TZ: "${TZ}"
     ports:
       - "8674:8674"                        # Curator status/health endpoint (LAN/Tailscale only — never WAN)
     volumes:
       - /volume1/docker/curator/config:/config
+      - /volume1/docker/curator/db:/db     # SQLite ledger — its OWN writable local mount; WAL is unsafe on /data or network shares (STATE-01)
       - /volume1/data:/data:ro             # Phase-1 stub only proves it can READ /data (read-only)
     restart: unless-stopped
 

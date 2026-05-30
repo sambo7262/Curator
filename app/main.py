@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-app = FastAPI(title="Curator", version="0.1.0-phase1")
+app = FastAPI(title="Curator", version="0.2.0-phase2")
 DATA = Path("/data")
 
 
