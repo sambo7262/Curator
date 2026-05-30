@@ -28,7 +28,23 @@ findings:
   warning: 6
   info: 4
   total: 12
-status: issues_found
+status: fixed
+fixed:
+  - BL-01
+  - BL-02
+  - CR-01
+  - CR-02
+  - WR-01
+  - WR-02
+  - WR-03
+  - WR-04
+  - WR-05
+  - WR-06
+  - IN-01
+  - IN-04
+not_fixed:
+  - IN-02   # deliberate Phase-4 staging decision; /data:ro stays as-is (out of Phase-2 scope)
+  - IN-03   # storage note flagged "acceptable for now"; not in the approved fix scope
 ---
 
 # Phase 2: Code Review Report
@@ -63,7 +79,7 @@ modes that the BLOCKER/Critical findings concern.
 
 ## Critical Issues
 
-### BL-01: Unbounded pagination loop can hang the primary Lidarr detection path
+### BL-01: [RESOLVED] Unbounded pagination loop can hang the primary Lidarr detection path
 
 **File:** `app/adapters/lidarr.py:36-55` (and identically `app/adapters/readarr.py:42-61`)
 **Issue:** The paging loop terminates only when
@@ -93,7 +109,7 @@ while True:
     page += 1
 ```
 
-### BL-02: Startup migration leaks its connection and discards it; no app-lifetime connection is kept
+### BL-02: [RESOLVED] Startup migration leaks its connection and discards it; no app-lifetime connection is kept
 
 **File:** `app/main.py:16-19`
 **Issue:** `_startup()` calls `run_migrations(connect(settings.db_path))`. The `connect()` result is
@@ -125,7 +141,7 @@ def _shutdown() -> None:
 (If a connection-per-request model is intended instead, that should be explicit and documented; as
 written it is neither — the connection simply leaks.)
 
-### CR-01: `None` API key produces an invalid header / hard crash when an *arr key is unset
+### CR-01: [RESOLVED] `None` API key produces an invalid header / hard crash when an *arr key is unset
 
 **File:** `app/adapters/lidarr.py:24-27`, `app/adapters/readarr.py:28-31`, `app/config.py:19-21`
 **Issue:** `config.Settings` types `lidarr_api_key`/`readarr_api_key` as `Optional[str]` and defaults
@@ -146,7 +162,7 @@ def __init__(self, base_url: str, api_key: str, client: httpx.Client):
 ```
 Readarr may instead degrade to a disabled adapter (return `[]`) rather than raise, to honor ARR-02.
 
-### CR-02: `httpx.Client` instances created in `build_adapters()` are never closed (resource leak)
+### CR-02: [RESOLVED] `httpx.Client` instances created in `build_adapters()` are never closed (resource leak)
 
 **File:** `app/core/gap_detector.py:53-57`
 **Issue:** `build_adapters()` constructs two `httpx.Client()` objects and hands them to the adapters,
@@ -170,7 +186,7 @@ And in `__main__`, wrap the run in `try/finally` that closes every client.
 
 ## Warnings
 
-### WR-01: Config env vars are captured at import time, not at instantiation
+### WR-01: [RESOLVED] Config env vars are captured at import time, not at instantiation
 
 **File:** `app/config.py:18-26`
 **Issue:** The `os.getenv(...)` calls are dataclass field defaults, evaluated once when the module is
@@ -193,7 +209,7 @@ def from_env(cls) -> "Settings":
 settings = Settings.from_env()
 ```
 
-### WR-02: Migration schema-apply and `user_version` bump are not atomic
+### WR-02: [RESOLVED] Migration schema-apply and `user_version` bump are not atomic
 
 **File:** `app/state/db.py:48-52`
 **Issue:** The connection is in autocommit mode (`isolation_level=None`). `executescript()` issues an
@@ -216,7 +232,7 @@ Note `executescript` auto-commits, defeating a wrapping BEGIN; prefer splitting 
 statements and `conn.execute()`-ing them inside one transaction, or document the idempotency
 requirement as a hard rule for every future migration.
 
-### WR-03: Lidarr `_map` will raise `KeyError` on a record missing `id`, aborting the primary run
+### WR-03: [RESOLVED] Lidarr `_map` will raise `KeyError` on a record missing `id`, aborting the primary run
 
 **File:** `app/adapters/lidarr.py:69`
 **Issue:** `arr_id=str(rec["id"])` uses subscript access. A malformed Lidarr record without `id`
@@ -230,7 +246,7 @@ skips such records.
 that a malformed Lidarr record is intended to be fatal. A defensive `if rec.get("id") is None: skip`
 mirrors Readarr and is cheap.
 
-### WR-04: Breaker never recovers — open state is permanent until process restart
+### WR-04: [RESOLVED] Breaker never recovers — open state is permanent until process restart
 
 **File:** `app/adapters/breaker.py:31-49`
 **Issue:** `_open()` returns `True` once `self._failures >= fail_threshold`, and the open branch in
@@ -244,7 +260,7 @@ failure count") but a success is unreachable once open.
 `_opened_at` and, when `now - _opened_at > reset_after`, attempt one inner call; success closes the
 breaker, failure re-arms the timer.
 
-### WR-05: Readarr `_paged` catches `KeyError` but the loop body has no `[...]` access that raises it
+### WR-05: [RESOLVED] Readarr `_paged` catches `KeyError` but the loop body has no `[...]` access that raises it
 
 **File:** `app/adapters/readarr.py:62`
 **Issue:** Minor robustness/coupling smell: the `except (httpx.HTTPError, ValueError, TypeError,
@@ -258,7 +274,7 @@ narrowing intent.
 **Fix:** Either drop `KeyError` or document precisely which call can raise each caught type; consider
 catching `Exception` deliberately (as the breaker does) if the intent is truly "any fault → []".
 
-### WR-06: `synchronous=NORMAL` + WAL has a known durability caveat on power loss
+### WR-06: [RESOLVED] `synchronous=NORMAL` + WAL has a known durability caveat on power loss
 
 **File:** `app/state/db.py:34`
 **Issue:** `PRAGMA synchronous=NORMAL` with WAL is the recommended throughput/durability balance, but
@@ -274,7 +290,7 @@ low-volume workload.
 
 ## Info
 
-### IN-01: `unused import` in main.py would be flagged, but `os` is used — verify lint config
+### IN-01: [RESOLVED] `unused import` in main.py would be flagged, but `os` is used — verify lint config
 
 **File:** `app/main.py:4-5`
 **Issue:** `import os` and `from pathlib import Path` are both used (`os.access`, `os.getenv`,
@@ -282,7 +298,7 @@ low-volume workload.
 is `0.2.0-phase2`; the hardcoded `1` is stale from Phase 1 and misreports the running phase.
 **Fix:** Return `"phase": 2` (or derive from `app.version`) so the health payload is accurate.
 
-### IN-02: `readyz` mounts `/data` read-only in compose but reports `data_readable` only
+### IN-02: [NOT FIXED — out of Phase-2 scope] `readyz` mounts `/data` read-only in compose but reports `data_readable` only
 
 **File:** `app/main.py:28-35`, `docker-compose.yml:85`
 **Issue:** Compose mounts `/volume1/data:/data:ro` (read-only), and `readyz` reports `R_OK`. This is
@@ -291,7 +307,7 @@ consistent for Phase 1/2, but Phases 4-6 require WRITE access to `/data` for sta
 **Fix:** Track as a known Phase-4 prerequisite — `/data` must become read-write before staging lands.
 Not a Phase-2 defect, flagged so it isn't forgotten.
 
-### IN-03: `GapItem.raw` stores the entire *arr record as JSON in every ledger row
+### IN-03: [NOT FIXED — out of Phase-2 scope] `GapItem.raw` stores the entire *arr record as JSON in every ledger row
 
 **File:** `app/state/repo.py:64`, `app/adapters/lidarr.py:76`
 **Issue:** `raw=rec` plus `json.dumps(item.raw)` persists the full *arr payload (including artist
@@ -301,7 +317,7 @@ Not a correctness bug; flagged as a storage/quality note.
 **Fix:** Acceptable for now; consider pruning `raw` to the fields later phases actually mine, or
 documenting expected row sizes.
 
-### IN-04: `build_adapters()` lazy imports duplicate the module-level firewall imports
+### IN-04: [RESOLVED] `build_adapters()` lazy imports duplicate the module-level firewall imports
 
 **File:** `app/core/gap_detector.py:46-51`
 **Issue:** `httpx`, `CircuitBreaker`, `LidarrAdapter`, `ReadarrAdapter`, and `config.settings` are
