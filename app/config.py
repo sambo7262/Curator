@@ -37,6 +37,19 @@ class Settings:
     match_w_track_titles: float = 4.0
     fakeflac_min_kbps: int = 400           # bytes/sec FLAC authenticity floor (RESEARCH 356)
 
+    # Phase-4 acquisition tunables (SP-4). All env-overridable via from_env(); no rebuild needed.
+    # NOTE: NO Plex fields — revised D-04 (2026-05-31) drops the Curator->Plex call entirely;
+    # IMPORT-04 is satisfied by the owner's existing "scan on new media" auto-scan (external
+    # precondition), so no PLEX_URL/PLEX_TOKEN secret enters the stack. [T-04-02 secrets stay Optional]
+    slskd_url: str = "http://localhost:5030"          # default; prod uses NAS IP via DEPLOY.md
+    slskd_api_key: Optional[str] = None               # read from env only, never logged/baked
+    acq_search_window_seconds: float = 12.0           # D-07 fixed collection window (Claude's discretion)
+    acq_stall_seconds: float = 600.0                  # D-01 no-progress stall threshold (~10 min)
+    acq_poll_seconds: float = 5.0                     # transfer poll interval
+    staging_root: str = "/data/downloads/soulseek"    # MUST match slskd directories.downloads (D-12)
+    quarantine_root: str = "/data/downloads/soulseek/.quarantine"
+    quarantine_ttl_seconds: float = 604800.0          # D-06 quarantine TTL (~7 days)
+
     @classmethod
     def from_env(cls) -> "Settings":
         """Build a Settings by reading the environment NOW (not at import time).
@@ -61,6 +74,18 @@ class Settings:
             match_w_track_count=float(os.getenv("MATCH_W_TRACK_COUNT", "4.0")),
             match_w_track_titles=float(os.getenv("MATCH_W_TRACK_TITLES", "4.0")),
             fakeflac_min_kbps=int(os.getenv("FAKEFLAC_MIN_KBPS", "400")),
+            # Phase-4 acquisition tunables — numerics cast float() so a bad operator value fails
+            # fast at startup (Phase-3 precedent); keys/tokens stay Optional (never baked/logged).
+            slskd_url=os.getenv("SLSKD_URL", "http://localhost:5030"),
+            slskd_api_key=os.getenv("SLSKD_API_KEY"),
+            acq_search_window_seconds=float(os.getenv("ACQ_SEARCH_WINDOW_SECONDS", "12.0")),
+            acq_stall_seconds=float(os.getenv("ACQ_STALL_SECONDS", "600.0")),
+            acq_poll_seconds=float(os.getenv("ACQ_POLL_SECONDS", "5.0")),
+            staging_root=os.getenv("STAGING_ROOT", "/data/downloads/soulseek"),
+            quarantine_root=os.getenv(
+                "QUARANTINE_ROOT", "/data/downloads/soulseek/.quarantine"
+            ),
+            quarantine_ttl_seconds=float(os.getenv("QUARANTINE_TTL_SECONDS", "604800.0")),
         )
 
 

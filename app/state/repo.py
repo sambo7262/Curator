@@ -93,3 +93,32 @@ def list_by_status(conn: sqlite3.Connection, status: str) -> List[sqlite3.Row]:
         "SELECT * FROM items WHERE status = ?",
         (status,),
     ).fetchall()
+
+
+def record_staged_file(conn: sqlite3.Connection, item_id: int, staging_path: str) -> int:
+    """Insert a staged_files row when a download begins; return its rowid (D-05/D-06 anchor).
+
+    `staging_path` is the absolute /data staging dir slskd writes into. In later waves it is
+    DERIVED from peer-influenced filenames, so — like every write in this layer — it is bound
+    via a `?` placeholder, never f-stringed into SQL (T-04-01 / repo.py security note).
+    """
+    cur = conn.execute(
+        "INSERT INTO staged_files (item_id, staging_path, created_at) VALUES (?, ?, ?)",
+        (item_id, staging_path, _now_iso()),
+    )
+    return cur.lastrowid
+
+
+def record_quarantine(
+    conn: sqlite3.Connection, staged_file_id: int, quarantine_path: str, reason: str
+) -> None:
+    """D-06: on a terminal/ambiguous failure, stamp the staged_files row with the quarantine
+    destination, the human-readable failure reason, and the quarantine timestamp.
+
+    All values are `?`-bound (peer-derived paths never reach SQL as literals — T-04-01)."""
+    conn.execute(
+        "UPDATE staged_files"
+        " SET quarantine_path = ?, failure_reason = ?, quarantined_at = ?"
+        " WHERE id = ?",
+        (quarantine_path, reason, _now_iso(), staged_file_id),
+    )
