@@ -1,29 +1,29 @@
 {
-  "_doc": "Expected ManualImport command body Curator POSTs to /api/v1/command for the importable files ONLY (ids 101+102 from get_mapping.json; the rejected 103 is filtered out). importMode casing + the files[] envelope are [ASSUMED] pending the 04-05 live DevTools capture (A1) — when pinned, update this ONE fixture, not every test. importMode=Move triggers the atomic hardlink within /data (D-09).",
+  "_doc": "Expected ManualImport command body Curator POSTs to /api/v1/command for the importable files ONLY (ids 101+102 from get_mapping.json; the rejected 103 is filtered out). A1 PINNED LIVE 2026-05-31 (04-05-LIVE-PROBE.md, DevTools capture on the real NAS Lidarr): importMode is LOWERCASE 'move' (NOT the old [ASSUMED] capital 'Move', NOT the UI default 'copy') for the atomic same-fs hardlink (D-09); replaceExistingFiles + sendUpdatesToClient are top-level as captured; per-file carries path/artistId/albumId/albumReleaseId/trackIds/quality(full QualityModel)/indexerFlags/disableReleaseSwitching and NO downloadId (the command-queue id/priority/status fields Lidarr adds on accept are not part of the body Curator sends). Paths reflect the A2 reality: slskd lands files at staging_root/<leaf-of-remote-folder>/ (no curator-* or batchId subdir).",
   "name": "ManualImport",
-  "importMode": "Move",
+  "importMode": "move",
+  "replaceExistingFiles": false,
+  "sendUpdatesToClient": true,
   "files": [
     {
-      "path": "/data/downloads/soulseek/curator-lidarr-1234/01 - Airbag.flac",
+      "path": "/data/downloads/soulseek/OK Computer (1997) [FLAC]/01 - Airbag.flac",
       "artistId": 7,
       "albumId": 55,
       "albumReleaseId": 900,
       "trackIds": [5001],
       "quality": {"quality": {"id": 6, "name": "FLAC"}, "revision": {"version": 1, "real": 0, "isRepack": false}},
       "indexerFlags": 0,
-      "disableReleaseSwitching": false,
-      "downloadId": "curator-lidarr-1234"
+      "disableReleaseSwitching": false
     },
     {
-      "path": "/data/downloads/soulseek/curator-lidarr-1234/02 - Paranoid Android.flac",
+      "path": "/data/downloads/soulseek/OK Computer (1997) [FLAC]/02 - Paranoid Android.flac",
       "artistId": 7,
       "albumId": 55,
       "albumReleaseId": 900,
       "trackIds": [5002],
       "quality": {"quality": {"id": 6, "name": "FLAC"}, "revision": {"version": 1, "real": 0, "isRepack": false}},
       "indexerFlags": 0,
-      "disableReleaseSwitching": false,
-      "downloadId": "curator-lidarr-1234"
+      "disableReleaseSwitching": false
     }
   ]
 }

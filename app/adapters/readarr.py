@@ -249,13 +249,21 @@ class ReadarrAdapter:
             return []
 
     def execute_import(self, decisions: list) -> Optional[None]:
-        """BEST-EFFORT: POST an explicit ManualImport(Move) command for the chosen book files
-        (mirrors Lidarr — never a blind rescan). Book wire fields (bookId/editionId/authorId) stay
-        adapter-local (A5). ANY fault swallows to None (the book degrades; music is untouched)."""
+        """BEST-EFFORT: POST an explicit ManualImport(move) command for the chosen book files
+        (mirrors Lidarr's A1 live-pinned envelope — never a blind rescan). Book wire fields
+        (bookId/editionId/authorId) stay adapter-local (A5). ANY fault swallows to None (the book
+        degrades; music is untouched).
+
+        [A1 — PINNED LIVE 2026-05-31] importMode is LOWERCASE "move" (atomic hardlink, D-09);
+        replaceExistingFiles is top-level false; no per-file downloadId (mirrors lidarr.py). The
+        capture was taken against Lidarr; Readarr is the same Servarr v1 ManualImport command shape.
+        """
         try:
             body = {
                 "name": "ManualImport",
-                "importMode": "Move",   # [ASSUMED A1: casing — verify live 04-05] atomic hardlink (D-09)
+                "importMode": "move",   # [A1 LIVE] lowercase; "move" for the atomic hardlink (D-09)
+                "replaceExistingFiles": False,   # [A1 LIVE] top-level, as captured from the UI POST
+                "sendUpdatesToClient": True,     # [A1 LIVE] UI default (optional but mirrored)
                 "files": [
                     {
                         "path": d.get("path"),
@@ -266,7 +274,6 @@ class ReadarrAdapter:
                         "quality": d.get("quality"),
                         "indexerFlags": d.get("indexerFlags", 0),
                         "disableReleaseSwitching": False,
-                        "downloadId": d.get("downloadId"),
                     }
                     for d in decisions
                 ],

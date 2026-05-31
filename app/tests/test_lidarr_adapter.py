@@ -294,8 +294,9 @@ def test_manual_import_candidates_returns_only_importable_subset(load_fixture):
 
 
 def test_execute_import_posts_manualimport_move_per_file(load_fixture):
-    """execute_import POSTs a ManualImport command in importMode=Move with one files[] entry per
-    decision carrying path/artistId/albumId/albumReleaseId/trackIds/quality — matching expected_post."""
+    """execute_import POSTs a ManualImport command in importMode="move" (A1 live-pinned lowercase)
+    with one files[] entry per decision carrying path/artistId/albumId/albumReleaseId/trackIds/quality
+    — matching the A1-reconciled expected_post fixture."""
     decisions = [c for c in load_fixture("manualimport/get_mapping") if not c["rejections"] and c["tracks"]]
     expected = load_fixture("manualimport/expected_post")
     captured = {}
@@ -305,7 +306,13 @@ def test_execute_import_posts_manualimport_move_per_file(load_fixture):
 
     body = captured["body"]
     assert body["name"] == "ManualImport"
-    assert body["importMode"] == "Move"
+    # A1 LIVE: importMode is LOWERCASE "move" (Curator's deliberate choice for the atomic hardlink,
+    # D-09) — NOT the old [ASSUMED] capital "Move", NOT the UI default "copy".
+    assert body["importMode"] == "move"
+    assert body["importMode"] == expected["importMode"]
+    # A1 LIVE: top-level replaceExistingFiles/sendUpdatesToClient as captured from the real UI POST.
+    assert body["replaceExistingFiles"] is False
+    assert body["sendUpdatesToClient"] is True
     assert len(body["files"]) == len(expected["files"]) == 2
     for got, exp in zip(body["files"], expected["files"]):
         assert got["path"] == exp["path"]
@@ -313,9 +320,11 @@ def test_execute_import_posts_manualimport_move_per_file(load_fixture):
         assert got["albumId"] == exp["albumId"]
         assert got["albumReleaseId"] == exp["albumReleaseId"]
         assert got["trackIds"] == exp["trackIds"]
-        assert got["quality"] == exp["quality"]
+        assert got["quality"] == exp["quality"]   # the FULL QualityModel echoed from the candidate
+        assert got["indexerFlags"] == exp["indexerFlags"]
         assert got["disableReleaseSwitching"] is False
-        assert got["downloadId"] == exp["downloadId"]
+        # A1 LIVE: the real POST carries NO per-file downloadId (command-queue metadata is not body).
+        assert "downloadId" not in got
 
 
 def test_execute_import_never_issues_downloaded_albums_scan(load_fixture):

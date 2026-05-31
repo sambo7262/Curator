@@ -2,7 +2,7 @@
   {
     "_doc": "IMPORTABLE: empty rejections + real resolved tracks -> passes the wanted-file filter (D-09). Field names VERIFIED from Lidarr ManualImportResource (path, name, artist, album, albumReleaseId, tracks, quality, rejections).",
     "id": 101,
-    "path": "/data/downloads/soulseek/curator-lidarr-1234/01 - Airbag.flac",
+    "path": "/data/downloads/soulseek/OK Computer (1997) [FLAC]/01 - Airbag.flac",
     "name": "01 - Airbag",
     "size": 24000000,
     "artist": {"id": 7, "artistName": "Radiohead"},
@@ -17,7 +17,7 @@
   {
     "_doc": "IMPORTABLE (second track of the same album): also empty rejections + real track.",
     "id": 102,
-    "path": "/data/downloads/soulseek/curator-lidarr-1234/02 - Paranoid Android.flac",
+    "path": "/data/downloads/soulseek/OK Computer (1997) [FLAC]/02 - Paranoid Android.flac",
     "name": "02 - Paranoid Android",
     "size": 32000000,
     "artist": {"id": 7, "artistName": "Radiohead"},
@@ -32,7 +32,7 @@
   {
     "_doc": "REJECTED: non-empty rejections (Lidarr could not match the file to a wanted track) -> the wanted-file filter must EXCLUDE this from the ManualImport POST. Proves the filter is testable in both directions.",
     "id": 103,
-    "path": "/data/downloads/soulseek/curator-lidarr-1234/folder.jpg",
+    "path": "/data/downloads/soulseek/OK Computer (1997) [FLAC]/folder.jpg",
     "name": "folder",
     "size": 51200,
     "artist": {"id": 0, "artistName": ""},

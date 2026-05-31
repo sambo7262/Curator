@@ -280,20 +280,31 @@ class LidarrAdapter:
         ]
 
     def execute_import(self, decisions: list) -> None:
-        """POST an explicit ManualImport command in importMode=Move for exactly the chosen files
+        """POST an explicit ManualImport command in importMode="move" for exactly the chosen files
         (D-09 — never a DownloadedAlbumsScan blind rescan, T-04-09). Each decision is a candidate
         dict returned by manual_import_candidates (opaque to core); this method reads its *arr keys
-        and builds the per-file files[] envelope. importMode "Move" is the atomic-hardlink contract
+        and builds the per-file files[] envelope. importMode "move" is the atomic-hardlink contract
         within the shared /data tree (the #1 import-failure cause is a cross-FS copy).
 
-        [ASSUMED A1] the importMode casing ("Move") and the files[] element key set are pinned live
-        in 04-05 via a DevTools capture; when confirmed, update the expected_post.json fixture + here.
+        [A1 — PINNED LIVE 2026-05-31, see 04-05-LIVE-PROBE.md] DevTools-captured envelope on the real
+        NAS Lidarr. The casing + shape are now confirmed against reality:
+          - top-level `importMode` is LOWERCASE ("move"/"copy"). Curator DELIBERATELY sends "move"
+            (NOT the UI default "copy", and NOT the old [ASSUMED] capital "Move") so the same-fs
+            ManualImport is an atomic hardlink-rename (D-09), after which acquire purges staging.
+          - top-level `replaceExistingFiles` is present and false; `sendUpdatesToClient` true is the
+            UI default (optional — included to mirror the captured UI POST).
+          - per-file: path, artistId, albumId, albumReleaseId, trackIds[], the FULL `quality`
+            QualityModel object echoed from the manualimport candidate, indexerFlags (int),
+            disableReleaseSwitching (bool). The observed POST carries NO per-file downloadId — the
+            command-queue id/priority/status fields Lidarr adds on accept are NOT part of the body.
 
         Lidarr is primary -> raise_for_status surfaces a hard fault.
         """
         body = {
             "name": "ManualImport",
-            "importMode": "Move",   # [ASSUMED A1: casing — verify live 04-05] atomic hardlink (D-09)
+            "importMode": "move",   # [A1 LIVE] lowercase; Curator sends "move" for the atomic hardlink (D-09)
+            "replaceExistingFiles": False,   # [A1 LIVE] top-level, as captured from the UI POST
+            "sendUpdatesToClient": True,     # [A1 LIVE] UI default (optional but mirrored)
             "files": [
                 {
                     "path": d.get("path"),
@@ -301,10 +312,9 @@ class LidarrAdapter:
                     "albumId": (d.get("album") or {}).get("id"),
                     "albumReleaseId": d.get("albumReleaseId"),
                     "trackIds": [t.get("id") for t in (d.get("tracks") or []) if isinstance(t, dict)],
-                    "quality": d.get("quality"),
+                    "quality": d.get("quality"),   # the FULL QualityModel echoed from the candidate
                     "indexerFlags": d.get("indexerFlags", 0),
                     "disableReleaseSwitching": False,
-                    "downloadId": d.get("downloadId"),
                 }
                 for d in decisions
             ],
