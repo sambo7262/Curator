@@ -28,7 +28,7 @@ the music path. Music must work end-to-end before the books adapter is layered i
 
 - [x] **GAP-01**: Curator detects monitored missing items from the `*arr` (wanted/missing) via the adapter
 - [x] **GAP-02**: Curator detects monitored cutoff-unmet items from the `*arr` (wanted/cutoff) via the adapter
-- [ ] **GAP-03**: Curator only acts on an item after a configurable grace window elapses AND no active/queued Usenet grab exists, so the Usenet pipeline gets first crack (fallback-only, never races)
+- [x] **GAP-03**: Curator only acts on an item after a configurable grace window elapses AND no active/queued Usenet grab exists, so the Usenet pipeline gets first crack (fallback-only, never races)
 
 ### Match Validation
 
@@ -68,9 +68,9 @@ the music path. Music must work end-to-end before the books adapter is layered i
 
 ### Reliability & Hands-Off Operation
 
-- [ ] **REL-01**: Curator runs continuously as a daemon with a scheduled poll loop and requires no manual triggering
-- [ ] **REL-02**: Curator self-recovers from transient failures (Lidarr/Readarr/slskd/VPN restarts, network blips) without manual intervention, classifying infra outages separately so they never burn a per-item attempt, and reconciles state on startup (no orphaned in-flight, no double-import)
-- [ ] **REL-03**: Curator surfaces stuck items (exceeded retries / blocked / unresolved) rather than failing silently
+- [x] **REL-01**: Curator runs continuously as a daemon with a scheduled poll loop and requires no manual triggering
+- [x] **REL-02**: Curator self-recovers from transient failures (Lidarr/Readarr/slskd/VPN restarts, network blips) without manual intervention, classifying infra outages separately so they never burn a per-item attempt, and reconciles state on startup (no orphaned in-flight, no double-import)
+- [x] **REL-03**: Curator surfaces stuck items (exceeded retries / blocked / unresolved) rather than failing silently
 
 ### Observability
 
@@ -136,13 +136,13 @@ Which phases cover which requirements.
 | IMPORT-03 | Phase 4 | Complete (04-04: verify-by-requery gates the purge; verify-False quarantines) |
 | IMPORT-04 | Phase 4 | Precondition (external Plex auto-scan; Curator does not call Plex — D-04 revised 2026-05-31) |
 | IMPORT-05 | Phase 4 | Complete (04-04: purge-on-success / quarantine-with-reason on every failure branch) |
-| GAP-03 | Phase 5 | Pending |
-| STATE-03 | Phase 5 | Pending |
+| GAP-03 | Phase 5 | Complete (05-04 eligibility grace + 05-02/05-04 per-item queue race check, driven by the live daemon wired in 05-05) |
+| STATE-03 | Phase 5 | Complete (05-01 backoff/attempt/dormant DAOs + 05-04 apply_result -> permanently-unavailable, driven by the live daemon wired in 05-05) |
 | SHARE-01 | Phase 5 | Complete |
 | SHARE-02 | Phase 5 | Complete |
-| REL-01 | Phase 5 | Pending |
-| REL-02 | Phase 5 | Pending |
-| REL-03 | Phase 5 | Pending |
+| REL-01 | Phase 5 | Complete (05-04 scheduler daemon + 05-05 lifecycle wiring — the daemon actually starts on app boot) |
+| REL-02 | Phase 5 | Complete (05-03 reconcile + INFRA_EXC classifier, wired into _startup in 05-05) |
+| REL-03 | Phase 5 | Complete (05-05 GET /status HTML + /status.json, html.escape XSS defense) |
 | OBS-01 | Phase 6 | Pending |
 | OBS-02 | Phase 6 | Pending |
 

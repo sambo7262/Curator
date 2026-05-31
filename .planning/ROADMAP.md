@@ -14,7 +14,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 - [x] **Phase 2: State Ledger + *arr Adapter + Gap Detection** - SQLite spine plus a `*-arr`-agnostic adapter that detects monitored missing/cutoff gaps and dedups them, with Readarr isolated behind the seam ✓ *all 4 plans complete 2026-05-30; detection wired end-to-end with dedup + Readarr-no-gate proven*
 - [x] **Phase 3: Matching & Quality Gating** - candidates scored against authoritative identity and filtered by `*arr` profile/cutoff (incl. fake-FLAC heuristics), rejecting wrong/low-quality matches before any download ✓ *all 5 plans complete 2026-05-30; gate.evaluate composes the corpus end-to-end (QUAL-02 both directions), firewall holds over all 8 core modules*
 - [x] **Phase 4: Acquisition, Staging & Clean Import** - eligible gaps are searched, downloaded into an isolated quarantine dir, imported (wanted files only) via Manual Import, verified into the library, then the staging dir is auto-purged ✓ *all 5 plans complete 2026-05-31; the single-item acquisition loop is pinned to the live slskd/Lidarr reality (A1 ManualImport `move` envelope, A2 remote-folder-leaf landing, A3 `Completed, Succeeded` terminal rule), offline suite 205 passed, firewall intact*
-- [ ] **Phase 5: Autonomy, Sharing & Self-Recovery** - the grace-gated daemon runs hands-off with backoff/do-not-retry, slskd shares real library content to stay unblocked, and the loop self-recovers and surfaces stuck items
+- [x] **Phase 5: Autonomy, Sharing & Self-Recovery** - the grace-gated daemon runs hands-off with backoff/do-not-retry, slskd shares real library content to stay unblocked, and the loop self-recovers and surfaces stuck items (code complete 2026-05-31; A2/A3 live probe + D-06 staged rollout PENDING owner NAS)
 - [ ] **Phase 6: Observability & Notifications** - a Homepage-consumable JSON status endpoint and Apprise push notifications make the hands-off system glanceable and event-aware
 
 ## Phase Details
@@ -115,8 +115,8 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 - [x] 05-01-PLAN.md — Wave 0: migration_0003 (attempt/backoff/dormant cols + permanently-unavailable status) + repo eligibility/backoff/counts DAOs + Phase-5 config tunables + state-side test scaffolds [STATE-03, GAP-03] ✓ (18 new 05-01 tests; 296 passed excl. out-of-scope scheduler leak)
 - [x] 05-02-PLAN.md — Wave 0: slskd shares ensure/self-heal client methods + Lidarr/Readarr get_queue_status (D-02 race check) + acquire.py INFRA_EXC classifier (A1) + FakeSlskd/fixtures [SHARE-01, SHARE-02, GAP-03, REL-02]
 - [x] 05-03-PLAN.md — Wave 1: core/shares.py ensure/self-heal cycle + core/reconcile.py startup orphan reset with verify-by-requery double-import guard (infra burns no attempt) [SHARE-01, SHARE-02, REL-02] ✓ 2026-05-31 (13 own tests green; SHARE-01/02 complete, REL-02 startup half)
-- [ ] 05-04-PLAN.md — Wave 2: detect_gaps batch transaction (D-15) + core/scheduler.py daemon loop (kill-switch/dry-run/MAX_CONCURRENT, eligibility dispatch, backoff->permanently-unavailable, single-writer LockedConn) [REL-01, GAP-03, STATE-03]
-- [ ] 05-05-PLAN.md — Wave 3: scheduler+reconcile lifecycle wiring + GET /status HTML (escaped) + /status.json + A2/A3 live-confirm checkpoint + DEPLOY.md staged-rollout/kill-switch [REL-03, REL-01, SHARE-02, GAP-03]
+- [x] 05-04-PLAN.md — Wave 2: detect_gaps batch transaction (D-15) + core/scheduler.py daemon loop (kill-switch/dry-run/MAX_CONCURRENT, eligibility dispatch, backoff->permanently-unavailable, single-writer LockedConn) [REL-01, GAP-03, STATE-03] ✓ 2026-05-31 (272 passed)
+- [x] 05-05-PLAN.md — Wave 3: scheduler+reconcile lifecycle wiring + GET /status HTML (escaped) + /status.json + A2/A3 live-confirm checkpoint + DEPLOY.md staged-rollout/kill-switch [REL-03, REL-01, SHARE-02, GAP-03] ✓ 2026-05-31 (277 passed; A2/A3 live probe + D-06 rollout are PENDING owner NAS actions)
 
 ### Phase 6: Observability & Notifications
 
@@ -138,7 +138,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 | 2. State Ledger + *arr Adapter + Gap Detection | 4/4 | ✓ Complete | 2026-05-30 |
 | 3. Matching & Quality Gating | 5/5 | ✓ Complete | 2026-05-31 |
 | 4. Acquisition, Staging & Clean Import | 5/5 | ✓ Complete (live-probe reconciliation pinned A1/A2/A3; 205 passed) | - |
-| 5. Autonomy, Sharing & Self-Recovery | 4/5 | In Progress|  |
+| 5. Autonomy, Sharing & Self-Recovery | 5/5 | ✓ Complete (277 passed, firewall clean; A2/A3 live probe + D-06 staged rollout PENDING owner NAS) | 2026-05-31 |
 | 6. Observability & Notifications | 0/0 | Not started | - |
 
 ## Coverage
