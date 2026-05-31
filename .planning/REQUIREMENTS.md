@@ -132,8 +132,8 @@ Which phases cover which requirements.
 | ACQ-02 | Phase 4 | Pending |
 | ACQ-03 | Phase 4 | Pending |
 | IMPORT-01 | Phase 4 | Pending |
-| IMPORT-02 | Phase 4 | Pending |
-| IMPORT-03 | Phase 4 | Pending |
+| IMPORT-02 | Phase 4 | In progress (04-03: adapter ManualImport-Move surface landed; loop composes 04-04) |
+| IMPORT-03 | Phase 4 | In progress (04-03: verify-by-requery surface landed; loop composes 04-04) |
 | IMPORT-04 | Phase 4 | Precondition (external Plex auto-scan; Curator does not call Plex — D-04 revised 2026-05-31) |
 | IMPORT-05 | Phase 4 | Pending |
 | GAP-03 | Phase 5 | Pending |
