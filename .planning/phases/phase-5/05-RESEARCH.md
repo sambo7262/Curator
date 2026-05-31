@@ -657,19 +657,24 @@ def get_queue_status(self, item: "GapItem") -> bool:
 | A3 | `GET /api/v0/application` → `shares.files` is an integer shared-file count, and `PUT /api/v0/shares` returns 204/409 | slskd Shares API | The count path is `[VERIFIED]` via the maintained Homepage widget (`appData.shares?.files`); the rescan route is `[CITED]` from slskd source. Residual risk: the application-state shape could differ by slskd version. LOW — owner confirms in one `curl`/Swagger check (recommended live checkpoint). |
 | A4 | A frozen `Settings` re-read of `ACQ_ENABLED`/`MAX_CONCURRENT` per cycle (vs a restart) is acceptable to the owner for "easy to manage" (D-05) | Pattern 1 | If the owner expects env changes to need a container restart anyway, the per-cycle re-read is unnecessary complexity. LOW — planner confirms; both work. `[ASSUMED]` |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Infra-vs-genuine failure boundary inside `acquire_item` (A1).**
+> All Phase-5 open questions and assumptions are resolved at plan time. Resolution references below:
+> **A1** (infra-vs-genuine boundary) → resolved in **05-02** (the `INFRA_EXC` seam + `test_infra_classify.py`).
+> **A2 / A3** (queue album-id field; slskd `application.shares.files` + rescan 204/409) → confirmed-shape offline now; pinned live in **05-05 Task 3 (live-confirm checkpoint)** mirroring Phase-4 04-05.
+> **A4** (per-cycle `ACQ_ENABLED`/`MAX_CONCURRENT` env re-read vs restart) → resolved in **05-04** (the scheduler re-reads each cycle; documented in the Scheduler action).
+
+1. **Infra-vs-genuine failure boundary inside `acquire_item` (A1).** _(RESOLVED — 05-02: `INFRA_EXC` classifier + `test_infra_classify.py`.)_
    - What we know: `acquire_item` returns `"imported"|"quarantined"|"stuck"`; its `_safe_call` swallows a decision-input fetch failure to `None`→`stuck`; slskd client calls `raise_for_status` (so an slskd outage raises).
    - What's unclear: whether the planner refactors `acquire_item` to surface infra faults as a distinct outcome, OR wraps the call site (Pattern 5) and accepts that a `_safe_call`-swallowed *arr outage becomes a wrongful `stuck`+attempt.
    - Recommendation: wrap at the call site for slskd/VPN faults (the common outage), AND make `_safe_call` re-raise (or tag) connection-class exceptions so an *arr decision-input outage is also classifiable. Scope this as one small task with a dedicated `test_infra_classify.py`.
 
-2. **Which non-terminal statuses are retry-eligible.**
+2. **Which non-terminal statuses are retry-eligible.** _(RESOLVED — 05-01 eligibility select takes `pending`/`stuck`/`quarantined`/`permanently-unavailable`; 05-03 reconcile additionally resets `searching` orphans to `pending` so they re-enter the pool.)_
    - What we know: `pending` is eligible; `imported`/in-flight are not.
    - What's unclear: whether `stuck`/`quarantined` re-enter the eligible pool on backoff (this research assumes yes — that IS the backoff mechanism) vs. requiring a manual nudge.
    - Recommendation: make `stuck`+`quarantined` retry-eligible (subject to backoff + the 3-attempt cap), since otherwise STATE-03's backoff has nothing to act on. Confirm with the owner at plan time (it's the difference between "auto-retries failures" and "surfaces failures and stops").
 
-3. **Per-cycle item cap vs. pure MAX_CONCURRENT.**
+3. **Per-cycle item cap vs. pure MAX_CONCURRENT (OQ-3).** _(RESOLVED — 05-04: the scheduler `LIMIT`s the eligibility select to `room = MAX_CONCURRENT * k` and hard-caps concurrency with `ThreadPoolExecutor(max_workers=MAX_CONCURRENT)`.)_
    - What we know: `MAX_CONCURRENT` caps simultaneous downloads.
    - What's unclear: whether a cycle should also cap the TOTAL items attempted per pass (e.g. process 10 then wait for next cycle) or drain as many as the pool allows until the eligible set is empty.
    - Recommendation: for the bounded rollout, `LIMIT` the eligibility select to a modest per-cycle cap (e.g. `MAX_CONCURRENT * k`) so a 6h cycle doesn't run for hours draining 1,493 gaps in one pass; planner picks `k`.
