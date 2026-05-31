@@ -63,8 +63,8 @@ the music path. Music must work end-to-end before the books adapter is layered i
 
 ### Automated Sharing
 
-- [ ] **SHARE-01**: Curator configures slskd shares pointing at real (read-only) library content so the account isn't blocked as a leecher
-- [ ] **SHARE-02**: Sharing stays active and scanned (shared-file count > 0) with no manual intervention
+- [x] **SHARE-01**: Curator configures slskd shares pointing at real (read-only) library content so the account isn't blocked as a leecher
+- [x] **SHARE-02**: Sharing stays active and scanned (shared-file count > 0) with no manual intervention
 
 ### Reliability & Hands-Off Operation
 
@@ -138,8 +138,8 @@ Which phases cover which requirements.
 | IMPORT-05 | Phase 4 | Complete (04-04: purge-on-success / quarantine-with-reason on every failure branch) |
 | GAP-03 | Phase 5 | Pending |
 | STATE-03 | Phase 5 | Pending |
-| SHARE-01 | Phase 5 | Pending |
-| SHARE-02 | Phase 5 | Pending |
+| SHARE-01 | Phase 5 | Complete |
+| SHARE-02 | Phase 5 | Complete |
 | REL-01 | Phase 5 | Pending |
 | REL-02 | Phase 5 | Pending |
 | REL-03 | Phase 5 | Pending |
@@ -147,6 +147,7 @@ Which phases cover which requirements.
 | OBS-02 | Phase 6 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 34 total
 - Mapped to phases: 34
 - Unmapped: 0
