@@ -316,3 +316,34 @@ class ReadarrAdapter:
         except (httpx.HTTPError, ValueError, TypeError, KeyError) as e:
             log.warning("readarr verify_imported degraded -> False (forces quarantine): %s", e)
             return False
+
+    # === Phase 5: the D-02 Usenet-race check (GAP-03) — BEST-EFFORT (ARR-02) =======================
+    # Mirrors Lidarr's get_queue_status but, like every Readarr method, swallows ANY fault to a safe
+    # default. The SAFE default here is False ("no active grab known") so a Readarr outage degrades to
+    # "Curator may act on the book" rather than raising into the scheduler — books NEVER gate music
+    # and a Readarr fault must never propagate (ARR-02). The book-identity wire field (`bookId`) +
+    # the `records` key stay adapter-local (A5); the return is a neutral bool.
+
+    def get_queue_status(self, item: GapItem) -> bool:
+        """D-02/GAP-03 (best-effort): True iff the Readarr queue has an active/queued grab for this
+        book (matched on bookId). ANY fault (HTTP / JSON / shape) degrades to False — never raises
+        into the loop (ARR-02). Issues the live queue read DIRECTLY (not via an already-swallowing
+        helper) so a 5xx is observed and degrades to False, the safe direction."""
+        try:
+            r = self._client.get(
+                f"{self._base}/api/v1/queue",
+                headers=self._headers,
+                params={"page": 1, "pageSize": 100},
+                timeout=30.0,
+            )
+            r.raise_for_status()
+            body = r.json()
+            records = body.get("records", []) if isinstance(body, dict) else []
+            return any(
+                str(rec.get("bookId")) == item.arr_id
+                for rec in records
+                if isinstance(rec, dict)
+            )
+        except (httpx.HTTPError, ValueError, TypeError, KeyError) as e:
+            log.warning("readarr get_queue_status degraded -> False: %s", e)
+            return False

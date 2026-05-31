@@ -337,3 +337,34 @@ class LidarrAdapter:
         """
         still_wanted = {g.arr_id for g in self.get_wanted()}
         return item.arr_id not in still_wanted
+
+    # === Phase 5: the D-02 Usenet-race check (GAP-03) ==============================================
+    # Fallback-only politeness: skip an item that already has an active/queued Usenet grab so Curator
+    # never races the primary pipeline. The *arr `records`/`albumId` queue wire keys are read HERE
+    # (the firewall) — only a neutral bool crosses to the scheduler (05-04). Lidarr is primary, so a
+    # hard fault surfaces (raise_for_status); the scheduler classifies that raise as an infra-skip
+    # (NOT a burned attempt — REL-02), never as 'no active grab'.
+
+    def get_queue_status(self, item: "GapItem") -> bool:
+        """D-02/GAP-03: True iff the *arr download queue has an active/queued grab for this item.
+
+        GET /api/v1/queue (page=1, pageSize=100); returns True iff any record's albumId (stringified)
+        == item.arr_id (an in-flight Usenet grab exists -> Curator skips it); False if no match.
+        Lidarr is primary -> raise_for_status surfaces a hard fault (the scheduler treats that as
+        infra-skip). The `records`/`albumId` keys stay in this method; the return is a neutral bool.
+        """
+        r = self._client.get(
+            f"{self._base}/api/v1/queue",
+            headers=self._headers,
+            params={"page": 1, "pageSize": 100},
+            timeout=30.0,
+        )
+        r.raise_for_status()
+        body = r.json()
+        records = body.get("records", []) if isinstance(body, dict) else []
+        # A2: confirm the albumId match field live (05-05).
+        return any(
+            str(rec.get("albumId")) == item.arr_id
+            for rec in records
+            if isinstance(rec, dict)
+        )
