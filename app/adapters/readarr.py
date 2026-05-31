@@ -12,7 +12,7 @@ from typing import Optional
 
 import httpx
 
-from adapters.base import GapItem
+from adapters.base import GapItem  # noqa: F401  (used by Phase-4 verify_imported signature)
 from core.manifest import Manifest
 from core.quality import Profile
 
@@ -211,3 +211,101 @@ class ReadarrAdapter:
         except (httpx.HTTPError, ValueError, TypeError, KeyError) as e:
             log.warning("readarr get_manifest(%s) degraded -> empty book manifest: %s", foreign_id, e)
             return Manifest(artist="", album="", track_count=1, track_titles=None, kind="book")
+
+    # === Phase 4: BEST-EFFORT import methods — swallow->safe default, books never gate music ========
+    # Mirror LidarrAdapter's import shapes (the explicit ManualImport(Move) path) but wrap EVERY body
+    # in the readarr swallow block so any fault degrades to a safe default (Pitfall 5 / ARR-02): a
+    # Readarr 5xx/timeout/garbage can NEVER raise into the loop. Book-identity wire fields
+    # (bookId/editionId/authorId) stay adapter-local (A5 — Readarr is unmaintained; a wrong guess
+    # degrades the single book, music is untouched). Safe defaults: [] / None / False.
+
+    def manual_import_candidates(self, path: str, download_id: Optional[str] = None) -> list:
+        """BEST-EFFORT: GET the Readarr Manual Import mapping and return ONLY the importable subset
+        (adapter-filtered, mirroring Lidarr — empty `rejections` + a non-empty resolved track list),
+        so core stays *arr-key-blind. ANY fault swallows to [] (Pitfall 5 — core's filter step then
+        sees an empty list and the book goes to quarantine-on-failure; music is never affected)."""
+        try:
+            r = self._client.get(
+                f"{self._base}/api/v1/manualimport",
+                headers=self._headers,
+                params={
+                    "folder": path,
+                    "downloadId": download_id,
+                    "filterExistingFiles": "true",
+                    "replaceExistingFiles": "true",
+                },
+                timeout=60.0,
+            )
+            r.raise_for_status()
+            resources = r.json()
+            if not isinstance(resources, list):
+                return []
+            return [
+                res for res in resources
+                if isinstance(res, dict) and not res.get("rejections") and res.get("tracks")
+            ]
+        except (httpx.HTTPError, ValueError, TypeError, KeyError) as e:
+            log.warning("readarr manual_import_candidates degraded -> []: %s", e)
+            return []
+
+    def execute_import(self, decisions: list) -> Optional[None]:
+        """BEST-EFFORT: POST an explicit ManualImport(Move) command for the chosen book files
+        (mirrors Lidarr — never a blind rescan). Book wire fields (bookId/editionId/authorId) stay
+        adapter-local (A5). ANY fault swallows to None (the book degrades; music is untouched)."""
+        try:
+            body = {
+                "name": "ManualImport",
+                "importMode": "Move",   # [ASSUMED A1: casing — verify live 04-05] atomic hardlink (D-09)
+                "files": [
+                    {
+                        "path": d.get("path"),
+                        "authorId": (d.get("author") or {}).get("id"),
+                        "bookId": (d.get("book") or {}).get("id"),
+                        "editionId": d.get("editionId"),
+                        "trackIds": [t.get("id") for t in (d.get("tracks") or []) if isinstance(t, dict)],
+                        "quality": d.get("quality"),
+                        "indexerFlags": d.get("indexerFlags", 0),
+                        "disableReleaseSwitching": False,
+                        "downloadId": d.get("downloadId"),
+                    }
+                    for d in decisions
+                ],
+            }
+            r = self._client.post(
+                f"{self._base}/api/v1/command",
+                headers=self._headers,
+                json=body,
+                timeout=60.0,
+            )
+            r.raise_for_status()
+            return None
+        except (httpx.HTTPError, ValueError, TypeError, KeyError) as e:
+            log.warning("readarr execute_import degraded -> None (book skipped): %s", e)
+            return None
+
+    def verify_imported(self, item: GapItem) -> bool:
+        """BEST-EFFORT: confirm a real import by re-querying — True iff the book id LEFT the wanted
+        list (D-03). ANY fault returns False (Pitfall 5 — a false-NEGATIVE forces quarantine, which is
+        safe; a false-POSITIVE would skip cleanup and leave junk). Books never gate music (ARR-02).
+
+        Note: this issues the wanted re-query DIRECTLY (not via get_wanted, whose _paged already
+        swallows a fault to []) so a 5xx is observed here and degrades to False — never a fake True.
+        """
+        try:
+            still_wanted = set()
+            for gap_type in ("missing", "cutoff"):
+                r = self._client.get(
+                    f"{self._base}/api/v1/wanted/{gap_type}",
+                    headers=self._headers,
+                    params={"page": 1, "pageSize": 100, "monitored": "true", "includeAuthor": "true"},
+                    timeout=30.0,
+                )
+                r.raise_for_status()
+                body = r.json()
+                for rec in (body.get("records") or []):
+                    if isinstance(rec, dict) and rec.get("id") is not None:
+                        still_wanted.add(str(rec["id"]))
+            return item.arr_id not in still_wanted
+        except (httpx.HTTPError, ValueError, TypeError, KeyError) as e:
+            log.warning("readarr verify_imported degraded -> False (forces quarantine): %s", e)
+            return False
