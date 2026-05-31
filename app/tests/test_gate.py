@@ -259,3 +259,33 @@ def test_selector_only_reads_uploader_fields():
         "uploader fields read outside selector.py (matching!=selection broken):\n"
         + "\n".join(offenders)
     )
+
+
+# === Phase-4 firewall: core/acquire.py carries ZERO *arr/slskd wire vocabulary ====================
+
+def test_acquire_has_no_arr_field_names():
+    """*arr-agnostic firewall, extended over the Phase-4 composition point (04-04): core/acquire.py
+    must contain ZERO *arr/slskd wire vocabulary in EXECUTABLE code. acquire_item orchestrates only
+    through the neutral adapter/client method surfaces and the neutral Candidate/Manifest/Profile/
+    GateResult/TransferProgress types — the *arr import keys + the slskd transfer/search wire keys all
+    stay inside the adapters (lidarr.py/readarr.py/slskd.py), never crossing into core.
+
+    Greps acquire.py line-by-line, comment-stripped via the existing _strip_comment helper (so a
+    docstring/comment mention is admitted — acquire.py avoids them in code anyway), for the wire-
+    vocabulary token set. This is ADDITIVE: it does not weaken the matching!=selection grep above or
+    the *arr-field grep in test_adapter_protocol.py."""
+    arr_fields = re.compile(
+        r"\b(?:folder|downloadId|albumReleaseId|importMode|X-Api-Key|X-API-Key"
+        r"|ManualImport|artistId|albumId|trackIds|searchText|bytesTransferred"
+        r"|isComplete|hasFreeUploadSlot)\b"
+    )
+    acquire_path = APP_DIR / "core" / "acquire.py"
+    offenders = []
+    for n, raw in enumerate(acquire_path.read_text(encoding="utf-8").splitlines(), start=1):
+        code = _strip_comment(raw)
+        if arr_fields.search(code):
+            offenders.append(f"{acquire_path}:{n}: {raw.strip()}")
+    assert not offenders, (
+        "core/acquire.py leaked *arr/slskd wire vocabulary into executable code "
+        "(the Phase-4 firewall is broken):\n" + "\n".join(offenders)
+    )
