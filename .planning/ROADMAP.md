@@ -92,7 +92,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
   4. After a forced VPN/slskd/`*arr` outage or a kill mid-transfer, Curator resumes on its own with no orphaned in-flight items and no double-import (infra outage consumed no per-item attempt), and any item that exceeds retries / is blocked is surfaced rather than failing silently.
   5. Hands-off test: across N consecutive days with zero manual actions, gaps continue to fill and no manual file mapping, junk cleanup, or container babysitting is ever required.
 **Plans**: 5 plans (4 build waves)
-- [ ] 05-01-PLAN.md — Wave 0: migration_0003 (attempt/backoff/dormant cols + permanently-unavailable status) + repo eligibility/backoff/counts DAOs + Phase-5 config tunables + state-side test scaffolds [STATE-03, GAP-03]
+- [x] 05-01-PLAN.md — Wave 0: migration_0003 (attempt/backoff/dormant cols + permanently-unavailable status) + repo eligibility/backoff/counts DAOs + Phase-5 config tunables + state-side test scaffolds [STATE-03, GAP-03] ✓ (18 new 05-01 tests; 296 passed excl. out-of-scope scheduler leak)
 - [ ] 05-02-PLAN.md — Wave 0: slskd shares ensure/self-heal client methods + Lidarr/Readarr get_queue_status (D-02 race check) + acquire.py INFRA_EXC classifier (A1) + FakeSlskd/fixtures [SHARE-01, SHARE-02, GAP-03, REL-02]
 - [ ] 05-03-PLAN.md — Wave 1: core/shares.py ensure/self-heal cycle + core/reconcile.py startup orphan reset with verify-by-requery double-import guard (infra burns no attempt) [SHARE-01, SHARE-02, REL-02]
 - [ ] 05-04-PLAN.md — Wave 2: detect_gaps batch transaction (D-15) + core/scheduler.py daemon loop (kill-switch/dry-run/MAX_CONCURRENT, eligibility dispatch, backoff->permanently-unavailable, single-writer LockedConn) [REL-01, GAP-03, STATE-03]
@@ -115,7 +115,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 | 2. State Ledger + *arr Adapter + Gap Detection | 4/4 | ✓ Complete | 2026-05-30 |
 | 3. Matching & Quality Gating | 5/5 | ✓ Complete | 2026-05-31 |
 | 4. Acquisition, Staging & Clean Import | 5/5 | ✓ Complete (live-probe reconciliation pinned A1/A2/A3; 205 passed) | - |
-| 5. Autonomy, Sharing & Self-Recovery | 0/5 | Planned (5 plans, 4 waves) | - |
+| 5. Autonomy, Sharing & Self-Recovery | 1/5 | In progress (05-01 ✓; Wave 0) | - |
 | 6. Observability & Notifications | 0/0 | Not started | - |
 
 ## Coverage
