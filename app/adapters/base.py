@@ -79,13 +79,24 @@ class ArrAdapter(Protocol):
         ...
 
     def manual_import_candidates(self, path: str) -> list:
-        """Phase 4 — *arr Manual Import API candidates for a staging path. Stubbed in Phase 2."""
+        """Phase 4 — *arr Manual Import API candidates for a staging path (IMPLEMENTED in Phase 4).
+
+        Returns the ALREADY-FILTERED importable subset: the adapter reads the *arr rejections/tracks
+        keys in-adapter and hands back ONLY the importable resources as opaque dicts, so core stays
+        key-blind (it never inspects *arr rejections/tracks). Core passes these straight back to
+        execute_import. Lidarr raises on a hard fault; Readarr degrades to [] (best-effort).
+        """
         ...
 
     def execute_import(self, decisions: list) -> None:
-        """Phase 4 — commit a Manual Import decision set. Stubbed in Phase 2."""
+        """Phase 4 — commit a Manual Import decision set via an explicit ManualImport(Move) command
+        (IMPLEMENTED in Phase 4; NEVER a blind DownloadedAlbumsScan rescan). Lidarr raises on fault;
+        Readarr degrades to None (best-effort)."""
         ...
 
     def verify_imported(self, item: GapItem) -> bool:
-        """Phase 4 — confirm the *arr imported the item into the library. Stubbed in Phase 2."""
+        """Phase 4 — confirm the *arr imported the item into the library by re-query (IMPLEMENTED in
+        Phase 4). True iff the item LEFT the wanted/missing list — 'downloaded' never counts as
+        'imported' (D-03). Lidarr raises on fault; Readarr returns False (best-effort, false-negative
+        forces quarantine, a false-positive would skip cleanup)."""
         ...

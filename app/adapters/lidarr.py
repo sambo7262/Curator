@@ -238,3 +238,92 @@ class LidarrAdapter:
             kind="album",
             year=rec.get("releaseYear") if isinstance(rec.get("releaseYear"), int) else None,
         )
+
+    # === Phase 4: the explicit *arr-agnostic ManualImport path (IMPORT-02/03, D-03/D-09) ==========
+    # This is the entire reason Curator exists — it replaces Soularr's blind drop-folder rescan with
+    # an explicit per-file ManualImport(Move). ALL *arr wire vocabulary
+    # (folder/downloadId/albumReleaseId/importMode/files[] keys, AND the rejections/tracks reads that
+    # drive the importability filter) lives ONLY in this file (the firewall): core/acquire.py gets the
+    # already-filtered importable subset back as opaque dicts and never reads an *arr key itself.
+
+    def manual_import_candidates(self, path: str, download_id: Optional[str] = None) -> list:
+        """GET the *arr's proposed file->track mapping for a staging folder, and return ONLY the
+        importable subset (D-09). The ADAPTER makes the importability decision here by reading the
+        *arr `rejections`/`tracks` keys: a resource is importable iff its `rejections` list is empty
+        AND its `tracks` list is non-empty. Everything else (folder.jpg, unmatched files, rejected
+        quality) is dropped so it can never reach execute_import. The returned dicts are opaque to
+        core — it passes them straight back to execute_import without reading a single *arr key.
+
+        base.py declares the param name `path`; it maps to the *arr `folder` query param here.
+        Lidarr is primary -> raise_for_status surfaces a hard fault (NOT swallowed).
+        """
+        r = self._client.get(
+            f"{self._base}/api/v1/manualimport",
+            headers=self._headers,
+            params={
+                "folder": path,                       # base.py `path` -> *arr `folder`
+                "downloadId": download_id,
+                "filterExistingFiles": "true",
+                "replaceExistingFiles": "true",
+            },
+            timeout=60.0,
+        )
+        r.raise_for_status()
+        resources = r.json()
+        if not isinstance(resources, list):
+            return []
+        # The importability filter (the *arr rejections/tracks reads stay HERE — core stays key-blind):
+        # keep only resources Lidarr matched to a wanted track with no rejection.
+        return [
+            res for res in resources
+            if isinstance(res, dict) and not res.get("rejections") and res.get("tracks")
+        ]
+
+    def execute_import(self, decisions: list) -> None:
+        """POST an explicit ManualImport command in importMode=Move for exactly the chosen files
+        (D-09 — never a DownloadedAlbumsScan blind rescan, T-04-09). Each decision is a candidate
+        dict returned by manual_import_candidates (opaque to core); this method reads its *arr keys
+        and builds the per-file files[] envelope. importMode "Move" is the atomic-hardlink contract
+        within the shared /data tree (the #1 import-failure cause is a cross-FS copy).
+
+        [ASSUMED A1] the importMode casing ("Move") and the files[] element key set are pinned live
+        in 04-05 via a DevTools capture; when confirmed, update the expected_post.json fixture + here.
+
+        Lidarr is primary -> raise_for_status surfaces a hard fault.
+        """
+        body = {
+            "name": "ManualImport",
+            "importMode": "Move",   # [ASSUMED A1: casing — verify live 04-05] atomic hardlink (D-09)
+            "files": [
+                {
+                    "path": d.get("path"),
+                    "artistId": (d.get("artist") or {}).get("id"),
+                    "albumId": (d.get("album") or {}).get("id"),
+                    "albumReleaseId": d.get("albumReleaseId"),
+                    "trackIds": [t.get("id") for t in (d.get("tracks") or []) if isinstance(t, dict)],
+                    "quality": d.get("quality"),
+                    "indexerFlags": d.get("indexerFlags", 0),
+                    "disableReleaseSwitching": False,
+                    "downloadId": d.get("downloadId"),
+                }
+                for d in decisions
+            ],
+        }
+        r = self._client.post(
+            f"{self._base}/api/v1/command",
+            headers=self._headers,
+            json=body,
+            timeout=60.0,
+        )
+        r.raise_for_status()
+
+    def verify_imported(self, item: "GapItem") -> bool:
+        """D-03: confirm a REAL import by re-querying the *arr — return True iff the item's id has
+        LEFT the wanted/missing+cutoff list. 'Downloaded' never counts as 'imported': if the album
+        is still wanted, the import did not land and this returns False (forcing quarantine upstream).
+
+        Re-uses the same wanted read get_wanted() drives, then checks the item's arr_id is absent.
+        Lidarr is primary -> raise_for_status surfaces a hard fault.
+        """
+        still_wanted = {g.arr_id for g in self.get_wanted()}
+        return item.arr_id not in still_wanted
