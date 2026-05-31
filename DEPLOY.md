@@ -106,3 +106,43 @@ sudo docker exec curator python -c "import sqlite3;print(sqlite3.connect('/db/cu
 Pass = Lidarr reached, real missing/cutoff gaps recorded at `pending`, re-run adds zero rows, and
 a Readarr fault (if any) logs + yields `readarr: 0` without taking the run down. Phase 2 **detects
 and records** only — no downloading/importing yet (that's Phase 4).
+
+## Step 8 — Phase 4 setup (Acquisition, Staging & Clean Import) — do on the Phase-4 teardown/redeploy
+
+Phase 4 performs the first real downloads + imports. Files move like this:
+**slskd downloads into a staging dir on `/data` → Curator calls the *arr Manual Import API → the
+*arr hardlink-Moves the wanted files into its library root folder.** Curator never moves bytes
+itself. For the Move to be an atomic hardlink (not a slow cross-volume copy — the #1 import-failure
+cause), slskd, curator, and the *arr must all see the SAME `/data` tree at identical paths.
+
+**4 setup items (all owner-side; Phase 4 code does NOT configure these — it assumes/verifies them):**
+
+```bash
+# 1. slskd DOWNLOAD directory -> inside /data  (this is SEPARATE from the shares you already set;
+#    shares = slskd.yml `shares.directories`; downloads = slskd.yml `directories.downloads`).
+#    Edit /volume1/docker/slskd/slskd.yml:
+#      directories:
+#        downloads:  /data/downloads/soulseek
+#        incomplete: /data/downloads/soulseek/.incomplete
+#    Must MATCH curator's STAGING_ROOT (default /data/downloads/soulseek). Then: sudo docker restart slskd
+
+# 2. pre-create the staging root owned by the shared uid/gid (slskd writes here, the *arr reads/moves it)
+sudo mkdir -p /volume1/data/downloads/soulseek/.quarantine
+sudo chown -R 1031:65536 /volume1/data/downloads/soulseek      # slskd UMASK 002 keeps it group-writable for the *arr
+
+# 3. curator /data mount: flip read-only -> read-write in docker-compose.yml
+#      - /volume1/data:/data        # was :ro (Phase-1 stub). Phase 4 writes/purges staging dirs here.
+#    then: sudo docker compose up -d curator   (recreate)
+
+# 4. VERIFY path identity (make-or-break): the *arr must mount the FULL /volume1/data:/data
+#    (not just a /music sub-path) AND have its root folder at /data/media/music (resp. /data/media/books),
+#    so it can SEE /data/downloads/soulseek for the ManualImport and Move it as a hardlink.
+sudo docker exec lidarr ls /data/downloads/soulseek            # must succeed (same path the *arr sees)
+#    Lidarr UI -> Settings -> Media Management -> Root Folders should list /data/media/music.
+#    (Phase-1 Go/No-Go already proved slskd->*arr hardlink capability on /data; this just confirms the
+#     download path is visible to the *arr too.)
+```
+
+Then the D-11 share precondition (already done — shares live, count > 0) gates the first live download.
+Plan **04-05** pauses at this gate and runs the live probes (slskd transfer-state strings, the real
+ManualImport POST envelope, batchId routing) before pinning the offline fixtures to reality.
