@@ -14,11 +14,14 @@ from typing import List, Tuple
 # Migration 0001 ships as a sibling .sql file read relative to THIS module, so the DDL is
 # editable as SQL and the same file is the source of truth for the schema.
 _SCHEMA_0001 = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
+# Migration 0002 (Phase 4): widen the items.status CHECK enum + add the staged_files table.
+_SCHEMA_0002 = (Path(__file__).parent / "migration_0002.sql").read_text(encoding="utf-8")
 
 # Ordered list of (version-label, sql). The 1-based index IS the user_version a migration
 # bumps to; append new tuples here for later phases — never reorder or mutate shipped ones.
 MIGRATIONS: List[Tuple[str, str]] = [
     ("0001", _SCHEMA_0001),
+    ("0002", _SCHEMA_0002),   # Phase 4: acquisition lifecycle states + staged_files table
 ]
 
 
