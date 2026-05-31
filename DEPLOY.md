@@ -179,3 +179,91 @@ wrong, not the share config.
 Once path-identity (#4) and the share count (> 0) are green, plan **04-05** runs the live probes (slskd
 transfer-state strings, the real ManualImport POST envelope, batchId routing) and pins the offline fixtures
 to reality. Phase-4 code never configures shares or download dirs — share automation is Phase 5 (SHARE-01/02).
+
+---
+
+## Step 9 — Phase 5 setup (Autonomy, Sharing & Self-Recovery) — do on the Phase-5 teardown/redeploy
+
+Phase 5 turns Curator into a hands-off daemon: on startup it runs `migration_0003`, reconciles any
+crash orphans, then a scheduler thread loops every `ACQ_POLL_INTERVAL_SECONDS` (default 6h) —
+detect gaps → ensure slskd shares → pick eligible items (grace + backoff + the *arr-queue race check)
+→ acquire up to `MAX_CONCURRENT` at once → import → verify → purge. It also serves a read-only status
+page at `http://<NAS-IP>:8674/status` (HTML) and `/status.json` (the Phase-6 widget contract). All of
+this is owner-managed with a few env flags — **no manual triggering, and a kill-switch to halt instantly.**
+
+### 1. New env tunables (defaults shown — all optional, sane defaults ship in the image)
+
+Set these in your `.env` (see `.env.example`). All are non-secret; no new API key is added in Phase 5.
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `ACQ_ENABLED` | `true` | **Kill-switch.** Set `false` to halt all acquisition instantly (takes effect on the next cycle — no restart needed; the daemon re-reads this each tick). |
+| `ACQ_DRY_RUN` | `false` | When `true`, the cycle searches + gates + LOGS the would-be winner but performs **zero side effects** (no download, no import, no status/attempt write). The safe first rollout step. |
+| `MAX_CONCURRENT` | `3` | Steady-state cap on simultaneous acquisitions. Start the live rollout at `1`, then raise to `3`. |
+| `ACQ_POLL_INTERVAL_SECONDS` | `21600` | Daemon cycle cadence (6h). The interval between automatic passes. |
+| `ACQ_GRACE_SECONDS` | `259200` | Usenet-politeness grace from an item's `discovered_at` (3 days). The existing ~1493-row backlog is already past grace, so it is eligible at launch — flood control is `MAX_CONCURRENT`, not grace. |
+| `ACQ_MAX_ATTEMPTS` | `3` | Genuine-failure attempts before an item is marked `permanently-unavailable`. |
+| `ACQ_DORMANT_SECONDS` | `2592000` | Dormant re-check TTL (30 days) — a `permanently-unavailable` item re-enters the pool once after this, in case a new uploader appeared. |
+
+Backoff between genuine-failure retries is fixed at **1h → 6h → 24h** (capped); infra outages
+(VPN/slskd/*arr unreachable) are classified as infra and burn **no** attempt.
+
+### 2. migration_0003 runs on the live DB at redeploy — BACK UP FIRST
+
+A Phase-5 redeploy runs `migration_0003` on the live `/db/curator.sqlite`, adding the
+`attempt_count` / `next_attempt_at` / `last_checked_at` columns and the `permanently-unavailable`
+status via a table rebuild. The rebuild preserves every existing row (proven by the 05-01 v0002→v0003
+preservation test), but **back the DB file up first as a precaution**:
+
+```bash
+# From a NAS SSH session, BEFORE recreating the curator container:
+sudo cp /volume1/docker/curator/db/curator.sqlite \
+        /volume1/docker/curator/db/curator.sqlite.bak-pre-0003
+sudo docker compose up -d curator        # recreate -> run_migrations applies 0003 on boot
+# Verify the migration applied and rows survived:
+sudo docker exec curator sqlite3 /db/curator.sqlite "PRAGMA user_version;"        # expect 3
+sudo docker exec curator sqlite3 /db/curator.sqlite "SELECT COUNT(*) FROM items;" # expect ~1493 (unchanged)
+```
+
+### 3. Staged rollout (D-05/D-06) — promote in three steps, never firehose the backlog
+
+Do NOT enable full autonomy on the first deploy. Promote deliberately and watch each step:
+
+**Step A — dry run (zero side effects).** Deploy with `ACQ_DRY_RUN=true`. Watch the logs across one
+cycle: the daemon logs the would-be winners but downloads/imports/writes nothing.
+```bash
+sudo docker logs -f curator        # look for "DRY-RUN (would acquire; ...)" lines, no downloads in slskd
+```
+
+**Step B — first live pass at cap=1 (the D-06 acceptance test).** Set `ACQ_DRY_RUN=false` and
+`MAX_CONCURRENT=1`, recreate, and watch ONE album flow end-to-end:
+search → download (slskd) → ManualImport **Move** → verify-by-requery → purge staging.
+```bash
+sudo docker compose up -d curator
+sudo docker logs -f curator
+# Confirm in the Lidarr UI the album imported, in slskd the transfer completed, and the staging dir
+# under /data/downloads/soulseek was purged. Check http://<NAS-IP>:8674/status for healthy throughput.
+```
+This single capped pass IS the Phase-5 live acceptance test (REL-01). There is no separate manual
+single-item trigger — the daemon at `MAX_CONCURRENT=1` does exactly one album per cycle.
+
+**Step C — steady state at cap=3.** Once Step B looks correct, set `MAX_CONCURRENT=3` and recreate.
+The backlog drains a few albums per cycle, oldest-first, bounded.
+
+### 4. Kill-switch
+
+To halt acquisition at any time WITHOUT a restart: set `ACQ_ENABLED=false` in `.env` and recreate
+(or change it however your env is injected) — the daemon re-reads it each cycle and skips. Set it
+back to `true` to resume. (The status page and `/detect` keep working regardless.)
+
+### 5. Shares stay owner-configured (D-11) — Curator only verifies/rescans
+
+slskd's shares stay configured in `slskd.yml` at `/data/media/music` + `/data/media/books`
+(read-only) exactly as set in Step 8. Phase 5 does **not** rewrite `slskd.yml`: each cycle Curator
+reads the shared-file count and, if it dropped to 0, triggers one rescan and surfaces a share issue
+on `/status` until the count recovers. No action needed here beyond keeping the Step-8 share config.
+
+> The slskd `application`/`shares` JSON shape (A3) + the *arr queue `albumId`/`bookId` field (A2) are
+> confirmed on the NAS via the two probes in `.planning/phases/phase-5/05-05-LIVE-PROBE.md` (mirrors
+> the Phase-4 A1/A2/A3 probes). The offline code already uses the research-confirmed shapes, so this
+> is a truth-pin, not a blocker.
