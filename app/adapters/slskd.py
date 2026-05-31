@@ -21,11 +21,23 @@
 # The injected httpx.Client makes the whole surface offline-provable with httpx.MockTransport /
 # respx (no live slskd) — see tests/test_slskd_client.py.
 import logging
+from dataclasses import dataclass
 from typing import Optional
 
 import httpx
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TransferHandle:
+    """An OPAQUE handle to an enqueued slskd transfer. acquire.py holds it across the watch/cancel
+    calls WITHOUT ever reading a username (which is a SELECTOR-ONLY Candidate field) — the firewall
+    boundary for the uploader identity. The fields below are slskd-internal addressing, not core
+    vocabulary; acquire treats the whole handle as a token."""
+
+    username: str
+    transfer_id: str
 
 # --- Transfer terminal-state substrings (A3 — [ASSUMED], pending the 04-05 live probe) ----------
 # slskd reports a transfer's lifecycle as a compound `state` string (e.g. "Completed, Succeeded").
@@ -92,6 +104,15 @@ class SlskdClient:
         body = r.json()
         return body if isinstance(body, dict) else {}
 
+    def search_is_complete(self, search_id: str) -> bool:
+        """NEUTRAL seam over search_state: True iff slskd reports the search complete.
+
+        This is the firewall boundary for the collection-window poll: the *arr/slskd wire key
+        `isComplete` is read HERE (in the client) and only the neutral bool crosses to core/acquire.py.
+        A malformed/absent flag reads as False (keep polling until the window deadline — T-04-06).
+        """
+        return bool(self.search_state(search_id).get("isComplete"))
+
     def search_responses(self, search_id: str) -> list:
         """GET /searches/{id}/responses; return the list of per-peer response items.
 
@@ -137,6 +158,50 @@ class SlskdClient:
         r.raise_for_status()
         body = r.json()
         return body if isinstance(body, dict) else {}
+
+    def enqueue_candidate(self, candidate) -> "TransferHandle":
+        """NEUTRAL enqueue seam: take a whole neutral Candidate and enqueue its files as a download.
+
+        The uploader identity (Candidate.username — a SELECTOR-ONLY field) and the slskd wire keys
+        (`filename`, `size`) are read HERE, in the client, NEVER in core/acquire.py: the loop hands
+        across the chosen Candidate and gets back an OPAQUE TransferHandle to watch/cancel, so the
+        firewall (and the matching!=selection grep) holds over acquire.py. Returns the handle that
+        addresses this transfer for transfer_progress()/cancel().
+        """
+        files = candidate.audio_files() or candidate.files
+        body = [{"filename": f.filename, "size": f.size_bytes} for f in files]
+        self.enqueue(candidate.username, body)
+        # slskd keys downloads by username; the handle carries it opaquely for the watch/cancel calls.
+        return TransferHandle(username=candidate.username, transfer_id=candidate.username)
+
+    def transfer_progress(self, handle: "TransferHandle"):
+        """NEUTRAL progress seam over transfer(): return acquire.TransferProgress(terminal, bytes_done).
+
+        Takes the opaque TransferHandle (so acquire never names a username) and interprets the slskd
+        wire keys (`state`, `bytesTransferred`) + the A3 terminal-state substrings HERE, handing core
+        only the neutral shape:
+          terminal   : "success" | "failure" | None (still in progress)
+          bytes_done : the monotonically-non-decreasing byte counter the stall watch diffs
+
+        TERMINAL_SUCCESS/FAILURE_SUBSTRINGS are the module-level named constants 04-05 re-pins live.
+        An absent counter reads as 0 (no progress) — never a KeyError (T-04-06).
+        """
+        from core.acquire import TransferProgress
+
+        t = self.transfer(handle.username, handle.transfer_id)
+        state = t.get("state") or ""
+        bytes_done = t.get("bytesTransferred") or 0
+        terminal = None
+        if any(s in state for s in TERMINAL_SUCCESS_SUBSTRINGS):
+            terminal = "success"
+        elif any(s in state for s in TERMINAL_FAILURE_SUBSTRINGS):
+            terminal = "failure"
+        return TransferProgress(terminal=terminal, bytes_done=bytes_done)
+
+    def cancel_transfer(self, handle: "TransferHandle", remove: bool = True) -> None:
+        """NEUTRAL cancel seam: cancel the transfer addressed by the opaque handle (remove=True drops
+        the partial from slskd's own list). acquire calls THIS (never naming a username)."""
+        self.cancel(handle.username, handle.transfer_id, remove=remove)
 
     def cancel(self, username: str, transfer_id: str, remove: bool = True) -> None:
         """DELETE /transfers/downloads/{username}/{id}?remove={bool}; cancel (and optionally remove).
