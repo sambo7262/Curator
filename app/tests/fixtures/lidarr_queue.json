@@ -1,0 +1,16 @@
+{
+  "page": 1,
+  "pageSize": 100,
+  "totalRecords": 1,
+  "records": [
+    {
+      "id": 5001,
+      "albumId": 42,
+      "artistId": 7,
+      "title": "OK Computer",
+      "status": "downloading",
+      "protocol": "usenet",
+      "downloadClient": "SABnzbd"
+    }
+  ]
+}
