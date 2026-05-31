@@ -33,25 +33,56 @@ log = logging.getLogger(__name__)
 class TransferHandle:
     """An OPAQUE handle to an enqueued slskd transfer. acquire.py holds it across the watch/cancel
     calls WITHOUT ever reading a username (which is a SELECTOR-ONLY Candidate field) — the firewall
-    boundary for the uploader identity. The fields below are slskd-internal addressing, not core
-    vocabulary; acquire treats the whole handle as a token."""
+    boundary for the uploader identity. The username/transfer_id fields are slskd-internal addressing,
+    not core vocabulary; acquire treats the whole handle as a token.
+
+    `landing_dir_name` (A2 — pinned live 2026-05-31, 04-05-LIVE-PROBE.md) is the NEUTRAL leaf-of-the-
+    remote-folder directory name slskd actually lands the files in under the downloads root. slskd
+    uses ONLY the last path segment of the peer's remote folder (peer `music\\ZHU\\BLACK MIDAS (2026)`
+    -> local `<downloads_root>/BLACK MIDAS (2026)/`), flat, with no `<username>/` or `<batchId>/`
+    subdir. acquire reads this neutral string (NOT the wire `folder` key) to resolve the real import
+    source + purge/quarantine target. It is a plain dir name, not *arr/slskd wire vocabulary."""
 
     username: str
     transfer_id: str
+    landing_dir_name: str = ""
 
-# --- Transfer terminal-state substrings (A3 — [ASSUMED], pending the 04-05 live probe) ----------
-# slskd reports a transfer's lifecycle as a compound `state` string (e.g. "Completed, Succeeded").
-# The neutral progress interpretation (terminal success vs failure vs in-progress) lives in
-# acquire.py (04-04) — this client only EXPOSES the raw transfer dict. These named constants are
-# defined HERE so 04-05 can re-pin the exact live strings in ONE place once probed on the NAS; the
-# fixtures (slskd/transfer_*.json) already use these literals. Do NOT bury state parsing in the
+
+def _remote_folder_leaf(remote_dir: str) -> str:
+    """Return the last path segment of a slskd remote folder, splitting on BOTH `\\` and `/`.
+
+    slskd reports peer paths with `\\` (backslash) separators (e.g. `music\\ZHU\\BLACK MIDAS (2026)`)
+    and lands the files locally under ONLY that last segment (A2). Pure, defensive string logic; an
+    empty/odd input yields "" (the caller falls back to its own deterministic label)."""
+    if not isinstance(remote_dir, str):
+        return ""
+    leaf = remote_dir.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    return leaf.strip()
+
+# --- Transfer terminal-state substrings (A3 — PINNED LIVE 2026-05-31, see 04-05-LIVE-PROBE.md) ---
+# slskd reports a transfer's lifecycle as a compound flag `state` string "<phase>, <completion>".
+# LIVE-OBSERVED terminal success on the NAS = "Completed, Succeeded" (ZHU – BLACK MIDAS, 14 FLAC
+# tracks, 2026-05-31). The neutral progress interpretation (terminal success vs failure vs
+# in-progress) lives in acquire.py (04-04) — this client only EXPOSES the raw transfer dict and
+# interprets the state here in transfer_progress. These named constants are pinned HERE in ONE place;
+# the fixtures (slskd/transfer_*.json) use the same literals. Do NOT bury state parsing in the
 # client beyond this module-level vocabulary.
-STATE_COMPLETED_SUCCEEDED = "Completed, Succeeded"   # [ASSUMED A3] terminal success substring set
-STATE_IN_PROGRESS = "InProgress"                     # [ASSUMED A3] still-transferring
-STATE_FAILED = "Completed, Errored"                  # [ASSUMED A3] terminal failure substring set
-# Substrings acquire.py (04-04) will test the live `state` against (re-pinned live by 04-05):
+#
+# ROBUST RULE (the substring rule is authoritative, not the exact literals): a transfer is
+# TERMINAL iff its state contains "Completed"; SUCCESS iff it also contains "Succeeded"; any other
+# terminal "Completed, *" (e.g. "Completed, Errored", "Completed, Cancelled") is a FAILURE -> fall
+# to the next candidate. Only the success family was observed live; the failure family is inferred,
+# so we keep the substring rule (not an unobserved exact literal) but retain named constants for the
+# expected failure/cancelled strings as documentation.
+STATE_COMPLETED_SUCCEEDED = "Completed, Succeeded"   # [LIVE-OBSERVED A3] terminal success
+STATE_IN_PROGRESS = "InProgress"                     # still-transferring (no "Completed")
+STATE_FAILED = "Completed, Errored"                  # [inferred A3] terminal failure family
+STATE_CANCELLED = "Completed, Cancelled"             # [inferred A3] terminal cancelled family
+# The substrings acquire.py's progress seam tests the live `state` against. "Completed" gates
+# terminality; the success/failure substrings then disambiguate the completion half (A3 rule):
+TERMINAL_PHASE_SUBSTRING = "Completed"
 TERMINAL_SUCCESS_SUBSTRINGS = ("Succeeded",)
-TERMINAL_FAILURE_SUBSTRINGS = ("Errored", "Failed", "Cancelled", "Rejected")
+TERMINAL_FAILURE_SUBSTRINGS = ("Errored", "Failed", "Cancelled", "Rejected", "Aborted")
 
 
 class SlskdClient:
@@ -171,8 +202,21 @@ class SlskdClient:
         files = candidate.audio_files() or candidate.files
         body = [{"filename": f.filename, "size": f.size_bytes} for f in files]
         self.enqueue(candidate.username, body)
+        # A2: resolve the dir slskd will actually land the files in — the leaf of the peer's remote
+        # folder. Prefer the candidate's folder; if absent, derive it from a file's directory portion
+        # (slskd filenames use `\` separators). The handle carries this NEUTRAL dir name so acquire
+        # can point the import + purge at the real landing folder without reading any wire key.
+        leaf = _remote_folder_leaf(candidate.folder)
+        if not leaf and files:
+            first = files[0].filename or ""
+            parent = first.replace("\\", "/").rstrip("/").rsplit("/", 1)
+            leaf = _remote_folder_leaf(parent[0]) if len(parent) > 1 else ""
         # slskd keys downloads by username; the handle carries it opaquely for the watch/cancel calls.
-        return TransferHandle(username=candidate.username, transfer_id=candidate.username)
+        return TransferHandle(
+            username=candidate.username,
+            transfer_id=candidate.username,
+            landing_dir_name=leaf,
+        )
 
     def transfer_progress(self, handle: "TransferHandle"):
         """NEUTRAL progress seam over transfer(): return acquire.TransferProgress(terminal, bytes_done).
@@ -191,11 +235,18 @@ class SlskdClient:
         t = self.transfer(handle.username, handle.transfer_id)
         state = t.get("state") or ""
         bytes_done = t.get("bytesTransferred") or 0
+        # A3 robust rule: a transfer is TERMINAL only once its state contains "Completed"; then the
+        # completion half disambiguates success vs failure. "Succeeded" => success; any other
+        # terminal ("Completed, Errored"/"Cancelled"/...) => failure. Anything without "Completed"
+        # (e.g. "InProgress", "Queued", "Initializing") is still running -> terminal None.
         terminal = None
-        if any(s in state for s in TERMINAL_SUCCESS_SUBSTRINGS):
-            terminal = "success"
-        elif any(s in state for s in TERMINAL_FAILURE_SUBSTRINGS):
-            terminal = "failure"
+        if TERMINAL_PHASE_SUBSTRING in state:
+            if any(s in state for s in TERMINAL_SUCCESS_SUBSTRINGS):
+                terminal = "success"
+            else:
+                # Any terminal completion that is NOT a success is a failure (fall to next candidate),
+                # whether or not it matches a named failure substring (the family is open-ended).
+                terminal = "failure"
         return TransferProgress(terminal=terminal, bytes_done=bytes_done)
 
     def cancel_transfer(self, handle: "TransferHandle", remove: bool = True) -> None:
