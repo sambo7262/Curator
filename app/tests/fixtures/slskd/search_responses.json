@@ -1,0 +1,39 @@
+[
+  {
+    "_doc": "Clean genuine-FLAC album, complete 12 tracks — the candidate gate.evaluate should ACCEPT. Maps directly onto Candidate.from_slskd (folder, username, freeUploadSlots, uploadSpeed, files[] attrs). Shape VERIFIED against searches.py SearchResponseItem.",
+    "username": "good_seeder",
+    "directory": "Radiohead - OK Computer (1997) [FLAC]",
+    "hasFreeUploadSlot": true,
+    "freeUploadSlots": 2,
+    "uploadSpeed": 500000,
+    "queueLength": 0,
+    "files": [
+      {"filename": "Radiohead - OK Computer (1997) [FLAC]/01 - Airbag.flac", "size": 24000000, "extension": "flac", "bitRate": 900, "bitDepth": 16, "length": 284, "sampleRate": 44100},
+      {"filename": "Radiohead - OK Computer (1997) [FLAC]/02 - Paranoid Android.flac", "size": 32000000, "extension": "flac", "bitRate": 880, "bitDepth": 16, "length": 383, "sampleRate": 44100},
+      {"filename": "Radiohead - OK Computer (1997) [FLAC]/03 - Subterranean Homesick Alien.flac", "size": 27000000, "extension": "flac", "bitRate": 870, "bitDepth": 16, "length": 287, "sampleRate": 44100},
+      {"filename": "Radiohead - OK Computer (1997) [FLAC]/04 - Exit Music (For a Film).flac", "size": 26000000, "extension": "flac", "bitRate": 860, "bitDepth": 16, "length": 264, "sampleRate": 44100},
+      {"filename": "Radiohead - OK Computer (1997) [FLAC]/05 - Let Down.flac", "size": 30000000, "extension": "flac", "bitRate": 890, "bitDepth": 16, "length": 299, "sampleRate": 44100},
+      {"filename": "Radiohead - OK Computer (1997) [FLAC]/06 - Karma Police.flac", "size": 28000000, "extension": "flac", "bitRate": 875, "bitDepth": 16, "length": 261, "sampleRate": 44100},
+      {"filename": "Radiohead - OK Computer (1997) [FLAC]/07 - Fitter Happier.flac", "size": 12000000, "extension": "flac", "bitRate": 820, "bitDepth": 16, "length": 117, "sampleRate": 44100},
+      {"filename": "Radiohead - OK Computer (1997) [FLAC]/08 - Electioneering.flac", "size": 25000000, "extension": "flac", "bitRate": 865, "bitDepth": 16, "length": 230, "sampleRate": 44100},
+      {"filename": "Radiohead - OK Computer (1997) [FLAC]/09 - Climbing Up the Walls.flac", "size": 29000000, "extension": "flac", "bitRate": 885, "bitDepth": 16, "length": 285, "sampleRate": 44100},
+      {"filename": "Radiohead - OK Computer (1997) [FLAC]/10 - No Surprises.flac", "size": 26000000, "extension": "flac", "bitRate": 850, "bitDepth": 16, "length": 229, "sampleRate": 44100},
+      {"filename": "Radiohead - OK Computer (1997) [FLAC]/11 - Lucky.flac", "size": 27000000, "extension": "flac", "bitRate": 870, "bitDepth": 16, "length": 259, "sampleRate": 44100},
+      {"filename": "Radiohead - OK Computer (1997) [FLAC]/12 - The Tourist.flac", "size": 28000000, "extension": "flac", "bitRate": 875, "bitDepth": 16, "length": 326, "sampleRate": 44100}
+    ]
+  },
+  {
+    "_doc": "Weaker candidate of the SAME album: below-cutoff MP3-192, no free slot, slow uploader. Still a valid Candidate.from_slskd shape (so the build path is exercised), but the quality gate declines it — the runner-up the selector/gate compares against.",
+    "username": "slow_leecher",
+    "directory": "Radiohead - OK Computer (1997) MP3",
+    "hasFreeUploadSlot": false,
+    "freeUploadSlots": 0,
+    "uploadSpeed": 20000,
+    "queueLength": 14,
+    "files": [
+      {"filename": "Radiohead - OK Computer (1997) MP3/01 - Airbag.mp3", "size": 4200000, "extension": "mp3", "bitRate": 192, "length": 284, "sampleRate": 44100},
+      {"filename": "Radiohead - OK Computer (1997) MP3/02 - Paranoid Android.mp3", "size": 5600000, "extension": "mp3", "bitRate": 192, "length": 383, "sampleRate": 44100},
+      {"filename": "Radiohead - OK Computer (1997) MP3/03 - Subterranean Homesick Alien.mp3", "size": 4300000, "extension": "mp3", "bitRate": 192, "length": 287, "sampleRate": 44100}
+    ]
+  }
+]

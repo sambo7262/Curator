@@ -1,0 +1,12 @@
+{
+  "_doc": "STALLED (no-byte-progress) snapshot: still in-progress per its state, but bytesTransferred has not advanced across polls. The stall watch declares death only when bytesTransferred is unchanged for acq_stall_seconds (D-01), then cancels (remove=true) and falls to the next candidate (D-02). [ASSUMED] in-progress state string pending the 04-05 live probe (A3) — reference via a named constant (e.g. STATE_IN_PROGRESS).",
+  "id": "transfer-2",
+  "username": "slow_leecher",
+  "filename": "Radiohead - OK Computer (1997) [FLAC]/01 - Airbag.flac",
+  "state": "InProgress",
+  "size": 24000000,
+  "bytesTransferred": 1048576,
+  "bytesRemaining": 22951424,
+  "percentComplete": 4.4,
+  "averageSpeed": 0.0
+}

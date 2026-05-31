@@ -1,0 +1,29 @@
+{
+  "_doc": "Expected ManualImport command body Curator POSTs to /api/v1/command for the importable files ONLY (ids 101+102 from get_mapping.json; the rejected 103 is filtered out). importMode casing + the files[] envelope are [ASSUMED] pending the 04-05 live DevTools capture (A1) — when pinned, update this ONE fixture, not every test. importMode=Move triggers the atomic hardlink within /data (D-09).",
+  "name": "ManualImport",
+  "importMode": "Move",
+  "files": [
+    {
+      "path": "/data/downloads/soulseek/curator-lidarr-1234/01 - Airbag.flac",
+      "artistId": 7,
+      "albumId": 55,
+      "albumReleaseId": 900,
+      "trackIds": [5001],
+      "quality": {"quality": {"id": 6, "name": "FLAC"}, "revision": {"version": 1, "real": 0, "isRepack": false}},
+      "indexerFlags": 0,
+      "disableReleaseSwitching": false,
+      "downloadId": "curator-lidarr-1234"
+    },
+    {
+      "path": "/data/downloads/soulseek/curator-lidarr-1234/02 - Paranoid Android.flac",
+      "artistId": 7,
+      "albumId": 55,
+      "albumReleaseId": 900,
+      "trackIds": [5002],
+      "quality": {"quality": {"id": 6, "name": "FLAC"}, "revision": {"version": 1, "real": 0, "isRepack": false}},
+      "indexerFlags": 0,
+      "disableReleaseSwitching": false,
+      "downloadId": "curator-lidarr-1234"
+    }
+  ]
+}

@@ -26,12 +26,16 @@ def tmp_db_path(tmp_path):
 
 @pytest.fixture
 def load_fixture():
-    """Loader: name (without .json) -> parsed dict from app/tests/fixtures/.
+    """Loader: name (without .json) -> parsed JSON from app/tests/fixtures/.
 
-    Example: load_fixture("lidarr_missing") -> {"page": 1, ..., "records": [...]}.
+    `name` may include a subdir, e.g. load_fixture("slskd/transfer_completed") reads
+    app/tests/fixtures/slskd/transfer_completed.json — so the Phase-4 slskd/ and
+    manualimport/ fixtures load through the same helper with no new wiring.
+
+    Returns whatever the file holds (a dict for an envelope, a list for a result array).
     """
 
-    def _load(name: str) -> dict:
+    def _load(name: str):
         path = FIXTURES_DIR / f"{name}.json"
         with path.open(encoding="utf-8") as fh:
             return json.load(fh)

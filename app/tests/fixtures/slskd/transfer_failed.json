@@ -1,0 +1,12 @@
+{
+  "_doc": "Terminal FAILURE snapshot. The stall watch treats a state containing 'Failed', 'Errored', or 'Cancelled' as terminal failure -> fall to next candidate, else mark the gap stuck (D-02). [ASSUMED] the exact compound state string pending the 04-05 live probe (A3) — reference via a named constant (e.g. STATE_FAILED), never a literal.",
+  "id": "transfer-3",
+  "username": "good_seeder",
+  "filename": "Radiohead - OK Computer (1997) [FLAC]/01 - Airbag.flac",
+  "state": "Completed, Errored",
+  "size": 24000000,
+  "bytesTransferred": 8388608,
+  "bytesRemaining": 15611392,
+  "percentComplete": 34.9,
+  "averageSpeed": 0.0
+}
