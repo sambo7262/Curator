@@ -58,7 +58,7 @@ the music path. Music must work end-to-end before the books adapter is layered i
 - [ ] **IMPORT-01**: Completed downloads land in an isolated per-item staging/quarantine dir on the shared `/data` tree, at a path addressed identically by slskd, Curator, and the `*arr` (hardlink-capable, no cross-FS copy)
 - [ ] **IMPORT-02**: Curator imports ONLY the wanted files via the `*arr` Manual Import / command API (never a blind drop-folder rescan), telling the `*arr` exactly which release/files to take
 - [ ] **IMPORT-03**: Curator verifies the item actually imported into the `/volume1` library (re-queries the `*arr`; "downloaded" never counts as "imported")
-- [ ] **IMPORT-04**: Curator confirms Plex reflects the new media (triggers/verifies a library scan)
+- [ ] **IMPORT-04**: New media is reflected in Plex — satisfied by the owner's existing Plex "scan on new media" (inotify) auto-scan, an external precondition (Phase-4 decision D-04, 2026-05-31). Curator does NOT call Plex (redundant with auto-scan; avoids a Plex secret in the stack). Revisit with an env-gated trigger only if imports are observed not appearing promptly.
 - [ ] **IMPORT-05**: After a verified import (or terminal failure) Curator AUTO-PURGES the per-item staging/quarantine dir, so leftover/unwanted files never reach `/volume1` and never need manual deletion; unresolved import failures are reconciled or surfaced, never silently dropped
 
 ### Automated Sharing
@@ -134,7 +134,7 @@ Which phases cover which requirements.
 | IMPORT-01 | Phase 4 | Pending |
 | IMPORT-02 | Phase 4 | Pending |
 | IMPORT-03 | Phase 4 | Pending |
-| IMPORT-04 | Phase 4 | Pending |
+| IMPORT-04 | Phase 4 | Precondition (external Plex auto-scan; Curator does not call Plex — D-04 revised 2026-05-31) |
 | IMPORT-05 | Phase 4 | Pending |
 | GAP-03 | Phase 5 | Pending |
 | STATE-03 | Phase 5 | Pending |

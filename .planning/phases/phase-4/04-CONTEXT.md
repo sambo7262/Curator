@@ -23,7 +23,7 @@ This phase performs Curator's **first real slskd downloads**. It consumes the Ph
 
 ### Import success bar (IMPORT-03/04)
 - **D-03:** The bar for DONE is **`*arr`-confirmed import into `/volume1`** — re-query the adapter and confirm the item left the wanted/missing list. "Downloaded" never counts as "imported."
-- **D-04:** The **Plex scan is fire-and-forget**: trigger it, never block completion or the staging purge on it, and do **not warn loudly** on a Plex hiccup — a quiet debug-level log only. Rationale (owner): the ~10k-track library has no metadata-mismatch problems today, so Plex is a trusted downstream view, not a gate. (`*arr` remains the source of truth.)
+- **D-04 (REVISED 2026-05-31):** **Curator does NOT call Plex at all.** The owner already runs Plex with "scan on new media" (inotify) auto-scan enabled, which catches Lidarr's same-volume hardlink/move imports. **IMPORT-04 is therefore satisfied by that external Plex setting — an owner precondition (like the D-11 manual-share precondition), NOT Curator code.** No `PlexClient`, no `PLEX_URL`/`PLEX_TOKEN` added to the stack (avoids managing a Plex secret). Rationale: Plex was already non-load-bearing (DONE = `*arr`-confirmed per D-03), and an explicit trigger would be redundant with the owner's auto-scan. **Revisit only if** imports are ever observed not appearing promptly in Plex — at which point add an env-gated trigger (fire only if `PLEX_TOKEN` is set).
 
 ### Staging purge / failure handling (IMPORT-05)
 - **D-05:** **Verified import → purge the per-item staging dir immediately.**
@@ -89,7 +89,7 @@ This phase performs Curator's **first real slskd downloads**. It consumes the Ph
 ### Integration Points
 - **NEW: slskd REST client** — no Curator→slskd client exists yet (Phase 1 set up slskd infra only). This is the major new surface: search submit/poll, download enqueue, transfer status/progress, cancel. Reached via gluetun's published port (`http://<NAS-IP>:5030`), `X-API-Key`.
 - **`*arr` Manual Import command API** — `GET /manualimport` mapping + `POST` `ManualImport` command (Move mode).
-- **Plex** — library scan trigger (fire-and-forget per D-04), reached by container name on synobridge.
+- **Plex** — NOT integrated by Curator (D-04 revised): the owner's existing "scan on new media" auto-scan handles IMPORT-04 externally. No Plex client/credential in the stack.
 - **Filesystem** — per-item staging dir + quarantine area inside the shared `/data` tree (no new bind-mount); purge/quarantine lifecycle.
 
 </code_context>
@@ -98,7 +98,7 @@ This phase performs Curator's **first real slskd downloads**. It consumes the Ph
 ## Specific Ideas
 
 - Owner's mental model to honor: "it's already in my wanted list theoretically" — yes, the *arr has the item on its missing list (Phase 2 gap detection reads exactly that); Phase 4 is what explicitly hands the downloaded file back to the *arr via Manual Import so the item leaves that list. The owner does nothing manually.
-- Plex is trusted and quiet: no loud warnings on Plex-scan failure (clean ~10k-track library, no current metadata-mismatch pain).
+- Plex is trusted and owner-managed: Curator does not touch Plex at all (D-04 revised) — the owner's "scan on new media" auto-scan reflects new imports, and an explicit Curator trigger would be redundant + add a Plex secret for no correctness gain.
 - Quarantine-with-TTL is the chosen middle path between "blind purge" (loses evidence) and "keep forever" (junk + manual chore).
 
 </specifics>
