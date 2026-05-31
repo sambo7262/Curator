@@ -74,7 +74,12 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
   2. Curator imports only the wanted files via the `*arr` Manual Import/command API (not a blind rescan) and verifies the item actually imported into the `/volume1` library and is reflected in Plex.
   3. After a verified import — or a terminal failure — the per-item staging/quarantine dir is auto-purged, leaving zero leftover/unwanted files on `/volume1` and requiring no manual deletion.
   4. A partial/stalled/failed download is timed out, cancelled, its staging dir cleaned, and the failure recorded/surfaced rather than hanging a slot or silently dropping.
-**Plans**: TBD
+**Plans**: 5 plans (3 build waves + 1 live-verification wave)
+- [ ] 04-01-PLAN.md — Wave 0: migration 0002 (status enum widen + staged_files) + staged_files DAOs + Phase-4 config tunables + offline slskd/manualimport fixtures [IMPORT-05, ACQ-02]
+- [ ] 04-02-PLAN.md — Wave 0: thin SlskdClient (search/enqueue/watch/cancel, X-API-Key) + staging.py path-traversal guard + purge/quarantine/TTL helpers [ACQ-01, ACQ-02, ACQ-03, IMPORT-01, IMPORT-05]
+- [ ] 04-03-PLAN.md — Wave 1: *arr-agnostic import methods (Lidarr ManualImport-Move + verify-by-requery; Readarr best-effort) + fire-and-forget PlexClient [IMPORT-02, IMPORT-03, IMPORT-04, IMPORT-05]
+- [ ] 04-04-PLAN.md — Wave 2: core/acquire.py composition loop (search→gate→download→stall-watch→import→verify→Plex→purge/quarantine, D-01..D-10) + firewall grep over acquire.py [ACQ-01/02/03, IMPORT-01..05]
+- [ ] 04-05-PLAN.md — Wave 3: D-11 slskd-share precondition checkpoint + live NAS probes (A1 ManualImport envelope / A2 batchId / A3 transfer-state strings) + reconcile fixtures to reality [ACQ-02, ACQ-03, IMPORT-01, IMPORT-02]
 
 ### Phase 5: Autonomy, Sharing & Self-Recovery
 **Goal**: Make the closed loop run itself, indefinitely, and politely: a scheduled daemon processes only grace-elapsed, Usenet-clear gaps; exponential backoff plus permanent "unavailable" memory govern retries; slskd shares real read-only library content so the account is never leech-blocked; and the system self-recovers from transient Lidarr/Readarr/slskd/VPN outages (infra failures never burn an attempt) and surfaces genuinely-stuck items.
@@ -104,7 +109,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 | 1. VPN-Routed Networking Foundation | 4/4 | ✓ Complete (deployed & verified on NAS) | 2026-05-30 |
 | 2. State Ledger + *arr Adapter + Gap Detection | 4/4 | ✓ Complete | 2026-05-30 |
 | 3. Matching & Quality Gating | 5/5 | ✓ Complete | 2026-05-31 |
-| 4. Acquisition, Staging & Clean Import | 0/0 | Not started | - |
+| 4. Acquisition, Staging & Clean Import | 0/5 | Planned (5 plans, 4 waves) | - |
 | 5. Autonomy, Sharing & Self-Recovery | 0/0 | Not started | - |
 | 6. Observability & Notifications | 0/0 | Not started | - |
 
