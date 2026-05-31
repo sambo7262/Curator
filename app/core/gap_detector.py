@@ -29,13 +29,27 @@ def detect_gaps(adapters: List[ArrAdapter], conn: sqlite3.Connection) -> Dict[st
     `readarr: 0` while the Lidarr items are fully upserted. Dedup is the STATE-02 guarantee, owned
     by repo.upsert_gap's ON CONFLICT(arr_app, arr_id) clause — a re-run refreshes rows in place
     and preserves any acted-on status rather than inserting duplicates.
+
+    D-15 batch transaction: every per-adapter upsert in the pass is wrapped in ONE explicit
+    BEGIN/COMMIT so the whole pass is a single fsync (synchronous=FULL is unchanged — durability
+    preserved, ~100x faster than per-row commits over the ~1493-gap ledger). On ANY exception the
+    pass ROLLBACKs wholly and re-raises, so a mid-pass fault never leaves a half-written pass behind.
+    The connection is autocommit (isolation_level=None) so these BEGIN/COMMIT statements are the
+    explicit transaction boundary (the same idiom run_migrations uses). The ON CONFLICT dedup +
+    status/discovered_at preservation in repo.upsert_gap is unchanged — the txn only batches the fsync.
     """
     counts: Dict[str, int] = {}
-    for adapter in adapters:
-        items = adapter.get_wanted()      # breaker-wrapped Readarr returns [] on fault — music unaffected
-        for it in items:
-            repo.upsert_gap(conn, it)
-        counts[adapter.app] = len(items)
+    conn.execute("BEGIN")
+    try:
+        for adapter in adapters:
+            items = adapter.get_wanted()  # breaker-wrapped Readarr returns [] on fault — music unaffected
+            for it in items:
+                repo.upsert_gap(conn, it)
+            counts[adapter.app] = len(items)
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
     return counts
 
 
