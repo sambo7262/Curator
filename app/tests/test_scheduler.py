@@ -81,6 +81,25 @@ def _item(app="lidarr", arr_id="1"):
                    artist_or_author="Artist", title="Title", foreign_id="fid", quality_profile_id=1)
 
 
+# --------------------------------------------------------------------------- row -> GapItem mapping
+def test_gapitem_from_row_carries_gap_type():
+    """Regression: _gapitem_from_row must map the ledger's gap_type column onto the REQUIRED
+    GapItem.gap_type field. It previously omitted gap_type, so every live cycle raised
+    `TypeError: GapItem.__init__() missing 1 required positional argument: 'gap_type'` the moment
+    select_eligible returned a row — the row->GapItem mapping was never exercised against a real
+    SELECT * row. Seed a 'cutoff' gap so we prove the value is READ from the row, not defaulted."""
+    conn = _conn()
+    _seed_item(conn, "9")  # default gap_type 'missing'
+    conn.execute("UPDATE items SET gap_type = 'cutoff' WHERE arr_id = '9'")
+    row = conn.execute("SELECT * FROM items WHERE arr_id = '9'").fetchone()
+
+    item = scheduler._gapitem_from_row(row)  # must NOT raise
+
+    assert item.gap_type == "cutoff"
+    assert (item.arr_app, item.arr_id, item.kind) == ("lidarr", "9", "album")
+    assert item.foreign_id == "fid-9"
+
+
 # --------------------------------------------------------------------------- loop lifecycle
 def test_loop_runs_a_cycle_then_stops_cleanly(monkeypatch):
     calls = {"n": 0}

@@ -245,6 +245,7 @@ def _gapitem_from_row(row) -> GapItem:
         arr_app=row["arr_app"],
         arr_id=row["arr_id"],
         kind=row["kind"],
+        gap_type=row["gap_type"],          # REQUIRED field — stored on every upsert (repo.upsert), read back here
         artist_or_author=row["artist_or_author"],
         title=row["title"],
         foreign_id=row["foreign_id"],
