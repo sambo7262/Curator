@@ -267,3 +267,48 @@ class SlskdClient:
             timeout=30.0,
         )
         r.raise_for_status()
+
+    # --- Phase 5: shares ensure / self-heal (SHARE-01/02, D-10) ---------------------------------
+    # The slskd `shares.files` count read + the rescan trigger live HERE (the firewall): core/shares.py
+    # (05-03) consumes ONLY the neutral int + bool these return, never an *arr/slskd wire key. Same
+    # posture as the rest of the client: self._base (gluetun-published settings.slskd_url, NEVER a
+    # container name — Pitfall 7), self._headers (capital X-API-Key, never logged/echoed — T-05-05),
+    # .get()-defensive reads, raise_for_status primary (the caller classifies a transport fault as
+    # infra — REL-02). Curator NEVER rewrites slskd.yml (D-10) — it only reads the count + rescans.
+    #
+    # Endpoints (RESEARCH §slskd Shares API):
+    #   GET /api/v0/application -> body["shares"]["files"]  (int; `shares.files` [VERIFIED] via the
+    #       maintained gethomepage/homepage slskd widget; full body live-confirmed in plan 05-05).
+    #   PUT /api/v0/shares      -> 204 (scan started) / 409 (a scan is already in progress).
+
+    def get_shared_file_count(self) -> int:
+        """SHARE-02: read slskd's current shared-file count from the application state.
+
+        GET /api/v0/application -> body['shares']['files'] (.get()-defensive: an absent/non-dict
+        shares or a non-int files reads as 0 — T-05-06, a malformed response never crashes). slskd
+        is primary, so a transport/HTTP fault surfaces (raise_for_status) for the caller to classify
+        as infra (REL-02). The `shares`/`files` wire keys stay in this method (the firewall)."""
+        r = self._client.get(f"{self._base}/application", headers=self._headers, timeout=30.0)
+        r.raise_for_status()
+        body = r.json()
+        if not isinstance(body, dict):
+            return 0
+        shares = body.get("shares")
+        if not isinstance(shares, dict):
+            return 0
+        files = shares.get("files")
+        return files if isinstance(files, int) else 0
+
+    def rescan_shares(self) -> bool:
+        """SHARE-02 self-heal: PUT /api/v0/shares to initiate a scan.
+
+        204 -> True (scan started); 409 -> False (a scan is already in progress — treated as
+        'already healing', NOT an error); any other non-2xx surfaces via raise_for_status (slskd is
+        primary). The rescan is async in slskd (the PUT returns immediately and the scan runs in the
+        background), so the ensure/self-heal cycle (05-03) re-checks the count on a LATER cycle
+        (eventually-consistent, Pitfall 6)."""
+        r = self._client.put(f"{self._base}/shares", headers=self._headers, timeout=30.0)
+        if r.status_code == 409:
+            return False
+        r.raise_for_status()
+        return True
