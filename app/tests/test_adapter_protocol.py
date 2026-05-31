@@ -21,7 +21,23 @@ from adapters.lidarr import LidarrAdapter
 from adapters.readarr import ReadarrAdapter
 
 APP_DIR = Path(__file__).resolve().parents[1]   # .../app
-ARR_FIELD_NAMES = re.compile(r"foreignAlbumId|X-Api-Key|records\[|profileId")
+# The locked *arr firewall token set. Phase 2 forbade foreignAlbumId / X-Api-Key / records[ /
+# profileId in core+state; Phase 3 EXTENDS it to the quality-profile-JSON shape leaks (Pitfall 2,
+# RESEARCH 423) now that get_quality_profile normalizes that JSON inside the adapters:
+#   - qualityProfileId  : the Sonarr/Radarr-style profile-id key (and the Readarr A-R2 spelling).
+#   - items\[ / "items" : the *arr profile's ordered allowed-list, whether reached as an attribute
+#                         subscript (items[i]) or a JSON-key access (profile["items"][i]).
+#   - "allowed"         : the per-item allowed flag, as a JSON KEY (quoted) — the neutral Profile
+#                         field is `allowed` (unquoted attr), so requiring the quotes avoids a
+#                         false-positive on `profile.allowed` / `allowed=frozenset(...)` in core.
+#   - "cutoff"          : the *arr profile cutoff as a JSON KEY (quoted). The neutral field is the
+#                         unquoted identifier `cutoff_rank` and the gate's English reason strings say
+#                         "below cutoff" / "cutoff met" — requiring the surrounding quotes targets the
+#                         JSON-key access (body["cutoff"] / .get("cutoff")) and never that prose.
+ARR_FIELD_NAMES = re.compile(
+    r"foreignAlbumId|X-Api-Key|records\[|profileId|qualityProfileId"
+    r"|items\[|\"items\"|\"allowed\"|\"cutoff\""
+)
 
 
 def _client() -> httpx.Client:
@@ -49,6 +65,13 @@ def test_both_satisfy_protocol():
         assert callable(adapter.get_wanted)
     # all three are interchangeable: the core only ever calls .app + .get_wanted()
     assert {lidarr.app, readarr.app, breaker.app} == {"lidarr", "readarr"}
+
+    # Phase 3 NEWLY implements get_quality_profile + get_manifest on the concrete adapters (no longer
+    # bare stubs). Both Lidarr and Readarr now expose them as callables (the breaker only forwards
+    # get_wanted, so it is intentionally excluded from this profile/manifest conformance check).
+    for adapter in (lidarr, readarr):
+        assert callable(adapter.get_quality_profile)
+        assert callable(adapter.get_manifest)
 
 
 def _strip_comment(line: str) -> str:
