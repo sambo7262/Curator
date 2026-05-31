@@ -28,7 +28,7 @@ class FakeAdapter:
 
 def _item(app, arr_id, title="T"):
     return GapItem(
-        arr_app=app, arr_id=str(arr_id), kind="album",
+        arr_app=app, arr_id=str(arr_id), kind="album", gap_type="missing",
         artist_or_author="Artist", title=title,
         foreign_id=f"fid-{arr_id}", quality_profile_id=1,
     )
