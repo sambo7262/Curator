@@ -58,7 +58,12 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
   2. When no candidate clears the configurable confidence threshold, Curator declines rather than grabbing a wrong/incomplete match.
   3. Curator reads the item's `*arr` quality profile/cutoff and filters out any candidate below cutoff before downloading (no downgrades).
   4. A FLAC candidate failing bitrate/size/source-tag sanity heuristics is rejected before download.
-**Plans**: TBD
+**Plans**: 5 plans
+- [ ] 03-01-PLAN.md — Wave 0: Candidate/CandidateFile/Manifest contract dataclasses + pure release_parse tokenizer + labeled fixture corpus (test-first) [MATCH-01]
+- [ ] 03-02-PLAN.md — Wave 0: rapidfuzz package-legitimacy human-verify + pin + Settings.from_env() threshold/weight/fake-FLAC-floor tunables [MATCH-02, QUAL-03]
+- [ ] 03-03-PLAN.md — Wave 1: ported beets weighted-distance matcher (score + rec-gap recommend) + zero-false-accept corpus calibration [MATCH-01, MATCH-02]
+- [ ] 03-04-PLAN.md — Wave 1: neutral Profile/QualityRank + no-downgrade cutoff gate + coarse fake-FLAC heuristics (skip-on-missing) [QUAL-01, QUAL-02, QUAL-03]
+- [ ] 03-05-PLAN.md — Wave 2: gate.py composition + dumb selector + adapter get_quality_profile/get_manifest normalization + extended firewall grep + end-to-end corpus proof [QUAL-01, MATCH-01, MATCH-02]
 
 ### Phase 4: Acquisition, Staging & Clean Import
 **Goal**: Close the loop for a real gap: Curator triggers an slskd search, downloads the chosen candidate into an isolated per-item staging/quarantine dir on the shared tree, imports ONLY the wanted files via the `*arr` Manual Import API, verifies the item left the wanted list into `/volume1`, confirms Plex reflects it — then auto-purges the staging dir so no leftover/unwanted files ever reach the library or need manual deletion. Partial/stalled transfers are timed out and cleaned.
@@ -98,7 +103,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 |-------|----------------|--------|-----------|
 | 1. VPN-Routed Networking Foundation | 4/4 | ✓ Complete (deployed & verified on NAS) | 2026-05-30 |
 | 2. State Ledger + *arr Adapter + Gap Detection | 4/4 | ✓ Complete | 2026-05-30 |
-| 3. Matching & Quality Gating | 0/0 | Not started | - |
+| 3. Matching & Quality Gating | 0/5 | Planned | - |
 | 4. Acquisition, Staging & Clean Import | 0/0 | Not started | - |
 | 5. Autonomy, Sharing & Self-Recovery | 0/0 | Not started | - |
 | 6. Observability & Notifications | 0/0 | Not started | - |
