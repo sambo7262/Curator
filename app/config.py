@@ -50,6 +50,17 @@ class Settings:
     quarantine_root: str = "/data/downloads/soulseek/.quarantine"
     quarantine_ttl_seconds: float = 604800.0          # D-06 quarantine TTL (~7 days)
 
+    # Phase-5 autonomy/scheduler tunables (SP-4). Drive the daemon, the bounded rollout, and the
+    # backoff/dormant schedule. All env-overridable via from_env(); no rebuild needed. NO secrets
+    # (D-13 defers Pushover) — every field is a non-secret bool/int/float.
+    acq_enabled: bool = True                          # D-05 global kill-switch (halt instantly)
+    acq_dry_run: bool = False                         # D-05 search+gate+log, ZERO side effects
+    max_concurrent: int = 3                           # D-04 steady-state cap (owner promotes 1 -> 3)
+    acq_poll_interval_seconds: float = 21600.0        # D-03 6h daemon cycle cadence
+    acq_grace_seconds: float = 259200.0               # D-01 3-day Usenet-politeness grace window
+    acq_max_attempts: int = 3                         # D-07 give-up threshold -> permanently-unavailable
+    acq_dormant_seconds: float = 2592000.0            # D-09 30-day dormant re-check TTL
+
     @classmethod
     def from_env(cls) -> "Settings":
         """Build a Settings by reading the environment NOW (not at import time).
@@ -86,6 +97,20 @@ class Settings:
                 "QUARANTINE_ROOT", "/data/downloads/soulseek/.quarantine"
             ),
             quarantine_ttl_seconds=float(os.getenv("QUARANTINE_TTL_SECONDS", "604800.0")),
+            # Phase-5 autonomy tunables. Bools parse via a truthy/falsey check (ACQ_ENABLED defaults
+            # true -> false only on 0/false/no; ACQ_DRY_RUN defaults false -> true on 1/true/yes);
+            # ints/floats cast so a bad operator value fails fast at startup (Phase-3/4 precedent).
+            acq_enabled=os.getenv("ACQ_ENABLED", "true").strip().lower()
+            not in ("0", "false", "no"),
+            acq_dry_run=os.getenv("ACQ_DRY_RUN", "false").strip().lower()
+            in ("1", "true", "yes"),
+            max_concurrent=int(os.getenv("MAX_CONCURRENT", "3")),
+            acq_poll_interval_seconds=float(
+                os.getenv("ACQ_POLL_INTERVAL_SECONDS", "21600.0")
+            ),
+            acq_grace_seconds=float(os.getenv("ACQ_GRACE_SECONDS", "259200.0")),
+            acq_max_attempts=int(os.getenv("ACQ_MAX_ATTEMPTS", "3")),
+            acq_dormant_seconds=float(os.getenv("ACQ_DORMANT_SECONDS", "2592000.0")),
         )
 
 
