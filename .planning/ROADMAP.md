@@ -138,7 +138,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 | 2. State Ledger + *arr Adapter + Gap Detection | 4/4 | ✓ Complete | 2026-05-30 |
 | 3. Matching & Quality Gating | 5/5 | ✓ Complete | 2026-05-31 |
 | 4. Acquisition, Staging & Clean Import | 5/5 | ✓ Complete (live-probe reconciliation pinned A1/A2/A3; 205 passed) | - |
-| 5. Autonomy, Sharing & Self-Recovery | 3/5 | In Progress|  |
+| 5. Autonomy, Sharing & Self-Recovery | 4/5 | In Progress|  |
 | 6. Observability & Notifications | 0/0 | Not started | - |
 
 ## Coverage
