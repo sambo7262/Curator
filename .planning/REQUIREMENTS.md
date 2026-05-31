@@ -38,8 +38,8 @@ the music path. Music must work end-to-end before the books adapter is layered i
 ### Quality Enforcement
 
 - [ ] **QUAL-01**: Curator reads the item's `*arr` quality profile and cutoff via the adapter
-- [ ] **QUAL-02**: Curator filters slskd candidates by format/bitrate BEFORE downloading and never grabs below cutoff (no downgrades)
-- [ ] **QUAL-03**: Curator applies heuristic fake/transcoded-FLAC checks (bitrate/size/source-tag sanity) before accepting a FLAC candidate
+- [x] **QUAL-02**: Curator filters slskd candidates by format/bitrate BEFORE downloading and never grabs below cutoff (no downgrades)
+- [x] **QUAL-03**: Curator applies heuristic fake/transcoded-FLAC checks (bitrate/size/source-tag sanity) before accepting a FLAC candidate
 
 ### Persistent State & Dedup
 
@@ -124,8 +124,8 @@ Which phases cover which requirements.
 | GAP-01 | Phase 2 | Complete (02-03; 02-04 missing detected→persisted end-to-end) |
 | GAP-02 | Phase 2 | Complete (02-03; 02-04 cutoff detected→persisted end-to-end) |
 | QUAL-01 | Phase 3 | Pending |
-| QUAL-02 | Phase 3 | Pending |
-| QUAL-03 | Phase 3 | Pending |
+| QUAL-02 | Phase 3 | Complete (03-04; no-downgrade gate, both REJECT+PERMIT directions proven) |
+| QUAL-03 | Phase 3 | Complete (03-04; coarse fake-FLAC heuristics, skip-on-missing-data) |
 | MATCH-01 | Phase 3 | Pending |
 | MATCH-02 | Phase 3 | Pending |
 | ACQ-01 | Phase 4 | Pending |

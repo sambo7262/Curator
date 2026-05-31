@@ -62,7 +62,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 - [x] 03-01-PLAN.md — Wave 0: Candidate/CandidateFile/Manifest contract dataclasses + pure release_parse tokenizer + labeled fixture corpus (test-first) [MATCH-01] ✅ complete
 - [x] 03-02-PLAN.md — Wave 0: rapidfuzz package-legitimacy human-verify + pin + Settings.from_env() threshold/weight/fake-FLAC-floor tunables [MATCH-02, QUAL-03] ✅ complete
 - [x] 03-03-PLAN.md — Wave 1: ported beets weighted-distance matcher (score + rec-gap recommend) + zero-false-accept corpus calibration [MATCH-01, MATCH-02] ✅ complete
-- [ ] 03-04-PLAN.md — Wave 1: neutral Profile/QualityRank + no-downgrade cutoff gate + coarse fake-FLAC heuristics (skip-on-missing) [QUAL-01, QUAL-02, QUAL-03]
+- [x] 03-04-PLAN.md — Wave 1: neutral Profile/QualityRank + no-downgrade cutoff gate (both QUAL-02 directions) + coarse fake-FLAC heuristics (skip-on-missing) [QUAL-01, QUAL-02, QUAL-03] ✅ complete
 - [ ] 03-05-PLAN.md — Wave 2: gate.py composition + dumb selector + adapter get_quality_profile/get_manifest normalization + extended firewall grep + end-to-end corpus proof [QUAL-01, MATCH-01, MATCH-02]
 
 ### Phase 4: Acquisition, Staging & Clean Import
