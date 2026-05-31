@@ -10,6 +10,8 @@ Offline-only: uses the conftest httpx_client factory (httpx.MockTransport) — n
 The real run is Python 3.12 at CI/NAS; the local sandbox (Python 3.9 + no httpx) gates on
 AST-parse + grep (see plan <automated>).
 """
+import json
+
 import httpx
 
 from adapters.base import ArrAdapter, GapItem
@@ -238,3 +240,160 @@ def test_lidarr_now_exposes_profile_and_manifest_methods(httpx_client):
     adapter = LidarrAdapter("http://test-arr", "k", httpx_client({}))
     assert callable(adapter.get_quality_profile)
     assert callable(adapter.get_manifest)
+
+
+# === Phase 4: ManualImport(Move) candidates / execute / verify (D-03/D-09; the firewall stays here) ===
+# The *arr-agnostic import path (the reason this project exists, replacing Soularr's blind rescan):
+#   - manual_import_candidates GETs /manualimport and returns ONLY the importable subset (the adapter
+#     filters out resources with a non-empty rejections[] or an empty tracks[] — core stays key-blind);
+#   - execute_import POSTs a ManualImport command in importMode=Move with a per-file files[] entry
+#     (NEVER a DownloadedAlbumsScan blind rescan, T-04-09);
+#   - verify_imported re-queries and returns True only if the item LEFT the wanted/missing list
+#     (D-03: "downloaded" != "imported").
+# All *arr wire keys (folder/downloadId/albumReleaseId/importMode/files[] + the rejections/tracks reads
+# that drive the filter) live ONLY in lidarr.py.
+
+def _capturing_command_client(captured: dict, *, status: int = 200):
+    """An offline client whose /api/v1/command POST records the JSON body it received."""
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/v1/command"):
+            captured["body"] = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(status, json={"id": 1, "status": "queued"})
+        return httpx.Response(404, json={})
+    return httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+
+
+def test_manual_import_candidates_returns_only_importable_subset(load_fixture):
+    """The adapter GETs /manualimport and returns ONLY the importable resources (empty rejections +
+    non-empty tracks). The rejected fixture resource (id 103, folder.jpg with rejections) is excluded
+    — the adapter, not core, read rejections/tracks to make the importability decision."""
+    mapping = load_fixture("manualimport/get_mapping")
+    captured = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/v1/manualimport"):
+            captured["params"] = dict(request.url.params)
+            return httpx.Response(200, json=mapping)
+        return httpx.Response(404, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    adapter = LidarrAdapter("http://test-arr", "k", client)
+
+    candidates = adapter.manual_import_candidates(
+        "/data/downloads/soulseek/curator-lidarr-1234", download_id="curator-lidarr-1234"
+    )
+
+    # only the two importable resources (101 + 102) survive; the rejected 103 is dropped
+    assert [c["id"] for c in candidates] == [101, 102]
+    assert all(not c["rejections"] and c["tracks"] for c in candidates)
+    # the GET carried the *arr query params (folder mapped from `path`, downloadId, filter flags)
+    assert captured["params"]["folder"] == "/data/downloads/soulseek/curator-lidarr-1234"
+    assert captured["params"]["downloadId"] == "curator-lidarr-1234"
+    assert captured["params"]["filterExistingFiles"] == "true"
+    assert captured["params"]["replaceExistingFiles"] == "true"
+
+
+def test_execute_import_posts_manualimport_move_per_file(load_fixture):
+    """execute_import POSTs a ManualImport command in importMode=Move with one files[] entry per
+    decision carrying path/artistId/albumId/albumReleaseId/trackIds/quality — matching expected_post."""
+    decisions = [c for c in load_fixture("manualimport/get_mapping") if not c["rejections"] and c["tracks"]]
+    expected = load_fixture("manualimport/expected_post")
+    captured = {}
+    adapter = LidarrAdapter("http://test-arr", "k", _capturing_command_client(captured))
+
+    adapter.execute_import(decisions)
+
+    body = captured["body"]
+    assert body["name"] == "ManualImport"
+    assert body["importMode"] == "Move"
+    assert len(body["files"]) == len(expected["files"]) == 2
+    for got, exp in zip(body["files"], expected["files"]):
+        assert got["path"] == exp["path"]
+        assert got["artistId"] == exp["artistId"]
+        assert got["albumId"] == exp["albumId"]
+        assert got["albumReleaseId"] == exp["albumReleaseId"]
+        assert got["trackIds"] == exp["trackIds"]
+        assert got["quality"] == exp["quality"]
+        assert got["disableReleaseSwitching"] is False
+        assert got["downloadId"] == exp["downloadId"]
+
+
+def test_execute_import_never_issues_downloaded_albums_scan(load_fixture):
+    """T-04-09: the command must be an explicit ManualImport, NEVER a blind DownloadedAlbumsScan."""
+    decisions = [c for c in load_fixture("manualimport/get_mapping") if not c["rejections"] and c["tracks"]]
+    captured = {}
+    adapter = LidarrAdapter("http://test-arr", "k", _capturing_command_client(captured))
+
+    adapter.execute_import(decisions)
+
+    assert captured["body"]["name"] == "ManualImport"
+    assert captured["body"]["name"] != "DownloadedAlbumsScan"
+
+
+def _verify_item(arr_id="1", foreign_id="m1"):
+    return GapItem(
+        arr_app="lidarr", arr_id=arr_id, kind="album", gap_type="missing",
+        title="OK Computer", artist_or_author="Radiohead", foreign_id=foreign_id,
+        quality_profile_id=1, raw={"id": int(arr_id), "foreignAlbumId": foreign_id},
+    )
+
+
+def test_verify_imported_true_when_item_left_wanted_list():
+    """D-03: verify_imported returns True when a re-query shows the item's id is ABSENT from
+    wanted/missing+cutoff — the item truly left the wanted list (a real import)."""
+    def _handler(request: httpx.Request) -> httpx.Response:
+        # wanted re-query returns OTHER ids only (the imported item 1 is gone)
+        if request.url.path.endswith("/api/v1/wanted/missing"):
+            return httpx.Response(200, json={
+                "page": 1, "pageSize": 100, "totalRecords": 1,
+                "records": [{"id": 99, "title": "Other", "foreignAlbumId": "m99",
+                             "profileId": 1, "artist": {"artistName": "Z"}}],
+            })
+        return httpx.Response(200, json={"page": 1, "pageSize": 100, "totalRecords": 0, "records": []})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    adapter = LidarrAdapter("http://test-arr", "k", client)
+    assert adapter.verify_imported(_verify_item(arr_id="1")) is True
+
+
+def test_verify_imported_false_when_item_still_present():
+    """D-03: 'downloaded' is NOT 'imported' — if the item is STILL on the wanted list, verify is False."""
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/v1/wanted/missing"):
+            return httpx.Response(200, json={
+                "page": 1, "pageSize": 100, "totalRecords": 1,
+                "records": [{"id": 1, "title": "OK Computer", "foreignAlbumId": "m1",
+                             "profileId": 1, "artist": {"artistName": "Radiohead"}}],
+            })
+        return httpx.Response(200, json={"page": 1, "pageSize": 100, "totalRecords": 0, "records": []})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    adapter = LidarrAdapter("http://test-arr", "k", client)
+    assert adapter.verify_imported(_verify_item(arr_id="1")) is False
+
+
+def test_import_methods_propagate_5xx_primary_posture():
+    """Lidarr is primary: a 5xx on any import method surfaces (raise_for_status), never swallowed."""
+    import pytest
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "lidarr down"})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    adapter = LidarrAdapter("http://test-arr", "k", client)
+    with pytest.raises(httpx.HTTPStatusError):
+        adapter.manual_import_candidates("/data/downloads/x", download_id="x")
+    with pytest.raises(httpx.HTTPStatusError):
+        adapter.execute_import([{"path": "/p", "artist": {"id": 1}, "album": {"id": 2},
+                                 "albumReleaseId": 3, "tracks": [{"id": 4}],
+                                 "quality": {}, "downloadId": "x"}])
+    with pytest.raises(httpx.HTTPStatusError):
+        adapter.verify_imported(_verify_item())
+
+
+def test_lidarr_exposes_import_methods(httpx_client):
+    """Protocol conformance: the three Phase-4 import methods are callable on the concrete adapter."""
+    adapter = LidarrAdapter("http://test-arr", "k", httpx_client({}))
+    assert callable(adapter.manual_import_candidates)
+    assert callable(adapter.execute_import)
+    assert callable(adapter.verify_imported)
