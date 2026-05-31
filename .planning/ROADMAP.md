@@ -103,7 +103,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 |-------|----------------|--------|-----------|
 | 1. VPN-Routed Networking Foundation | 4/4 | ✓ Complete (deployed & verified on NAS) | 2026-05-30 |
 | 2. State Ledger + *arr Adapter + Gap Detection | 4/4 | ✓ Complete | 2026-05-30 |
-| 3. Matching & Quality Gating | 0/5 | Planned | - |
+| 3. Matching & Quality Gating | 5/5 | ✓ Complete | 2026-05-31 |
 | 4. Acquisition, Staging & Clean Import | 0/0 | Not started | - |
 | 5. Autonomy, Sharing & Self-Recovery | 0/0 | Not started | - |
 | 6. Observability & Notifications | 0/0 | Not started | - |
