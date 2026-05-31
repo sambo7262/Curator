@@ -17,6 +17,8 @@ from state.db import connect, run_migrations
 from state.repo import (
     upsert_gap, get_gap, set_status, list_by_status,
     record_staged_file, record_quarantine,
+    select_eligible, record_attempt, status_counts, imported_recent,
+    backoff_for, BACKOFF_SECONDS,
 )
 
 # Phase-2 lifecycle statuses (migration 0001).
@@ -311,6 +313,44 @@ def test_settings_env_override_and_failfast(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Phase 5 — autonomy/scheduler config tunables (D-01/03/04/05/07/09): defaults, override, fail-fast.
+# ---------------------------------------------------------------------------
+
+def test_settings_phase5_defaults():
+    """Settings.from_env() with no env returns the documented Phase-5 defaults (and no secrets)."""
+    import config
+    s = config.Settings.from_env()
+    assert s.acq_enabled is True                       # D-05 kill-switch defaults ON
+    assert s.acq_dry_run is False                      # D-05 dry-run defaults OFF
+    assert s.max_concurrent == 3                       # D-04 steady-state cap
+    assert s.acq_poll_interval_seconds == 21600.0      # D-03 6h cadence
+    assert s.acq_grace_seconds == 259200.0             # D-01 3-day grace
+    assert s.acq_max_attempts == 3                     # D-07 give-up threshold
+    assert s.acq_dormant_seconds == 2592000.0          # D-09 30-day dormant TTL
+    # D-13: NO push/notification secret on Settings (Pushover is a Phase-6 wiring).
+    assert not hasattr(s, "pushover_token")
+    assert not hasattr(s, "apprise_url")
+
+
+def test_settings_phase5_env_override_and_failfast(monkeypatch):
+    """Env overrides are honored (incl. bool flags); a non-numeric numeric tunable fails fast."""
+    import config
+    monkeypatch.setenv("MAX_CONCURRENT", "1")
+    monkeypatch.setenv("ACQ_ENABLED", "false")
+    monkeypatch.setenv("ACQ_DRY_RUN", "true")
+    monkeypatch.setenv("ACQ_GRACE_SECONDS", "3600")
+    s = config.Settings.from_env()
+    assert s.max_concurrent == 1
+    assert s.acq_enabled is False
+    assert s.acq_dry_run is True
+    assert s.acq_grace_seconds == 3600.0
+    # A bad numeric operator value raises at construction (fail-fast).
+    monkeypatch.setenv("MAX_CONCURRENT", "not-an-int")
+    with pytest.raises(ValueError):
+        config.Settings.from_env()
+
+
+# ---------------------------------------------------------------------------
 # Phase 4 — offline fixtures parse into the contracts later waves depend on.
 # ---------------------------------------------------------------------------
 
@@ -355,3 +395,93 @@ def test_get_mapping_fixture_filters_to_importable(load_fixture):
     expected = load_fixture("manualimport/expected_post")
     assert expected["name"] == "ManualImport"
     assert len(expected["files"]) == len(importable)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — migration 0003 + autonomy DAOs (STATE-03 / GAP-03 / D-07/08/09).
+# ---------------------------------------------------------------------------
+
+def test_migration_0003_bumps_user_version_to_3(tmp_db_path):
+    """A fresh DB migrates all the way to user_version 3 with the three new columns present."""
+    conn = connect(tmp_db_path)
+    run_migrations(conn)
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(items)").fetchall()}
+    assert {"attempt_count", "next_attempt_at", "last_checked_at"} <= cols
+    conn.close()
+
+
+def test_permanently_unavailable_status_roundtrips(tmp_db_path):
+    """After 0003 the new terminal status round-trips via set_status (STATE-03 / D-07)."""
+    conn = connect(tmp_db_path)
+    run_migrations(conn)
+    upsert_gap(conn, _gap())
+    set_status(conn, "lidarr", "42", "permanently-unavailable")
+    assert get_gap(conn, "lidarr", "42")["status"] == "permanently-unavailable"
+    conn.close()
+
+
+def test_backoff_for_ladder_and_cap():
+    """D-08: 1h -> 6h -> 24h, capped at 24h; non-positive attempts clamp to the first rung."""
+    assert BACKOFF_SECONDS == [3600, 21600, 86400]
+    assert backoff_for(1) == 3600
+    assert backoff_for(2) == 21600
+    assert backoff_for(3) == 86400
+    assert backoff_for(9) == 86400
+    assert backoff_for(0) == 3600
+
+
+def test_select_eligible_grace_and_backoff(tmp_db_path):
+    """select_eligible honors grace (GAP-03) + backoff (D-08): grace-elapsed + backoff-clear only."""
+    conn = connect(tmp_db_path)
+    run_migrations(conn)
+    now = "2026-01-31T00:00:00Z"
+    grace_cutoff = "2026-01-28T00:00:00Z"
+    dormant_cutoff = "2026-01-01T00:00:00Z"
+
+    upsert_gap(conn, _gap(arr_id="old"))      # grace-elapsed pending -> eligible
+    upsert_gap(conn, _gap(arr_id="fresh"))    # within grace -> NOT eligible
+    upsert_gap(conn, _gap(arr_id="backoff"))  # grace-elapsed but backoff in the future -> NOT eligible
+    conn.execute("UPDATE items SET discovered_at = ? WHERE arr_id = ?",
+                 ("2020-01-01T00:00:00Z", "old"))
+    conn.execute("UPDATE items SET discovered_at = ? WHERE arr_id = ?",
+                 ("2026-01-30T00:00:00Z", "fresh"))
+    conn.execute("UPDATE items SET discovered_at = ?, next_attempt_at = ? WHERE arr_id = ?",
+                 ("2020-01-01T00:00:00Z", "2026-12-01T00:00:00Z", "backoff"))
+
+    rows = select_eligible(conn, grace_cutoff, now, dormant_cutoff, 10)
+    assert [r["arr_id"] for r in rows] == ["old"]
+    conn.close()
+
+
+def test_record_attempt_writes_all_columns(tmp_db_path):
+    """record_attempt stamps attempt_count/next_attempt_at/status + a last_checked_at timestamp."""
+    conn = connect(tmp_db_path)
+    run_migrations(conn)
+    upsert_gap(conn, _gap())
+    record_attempt(conn, "lidarr", "42", 2, "2026-02-01T00:00:00Z", "stuck")
+    row = get_gap(conn, "lidarr", "42")
+    assert row["attempt_count"] == 2
+    assert row["next_attempt_at"] == "2026-02-01T00:00:00Z"
+    assert row["status"] == "stuck"
+    assert row["last_checked_at"]   # stamped via _now_iso()
+    conn.close()
+
+
+def test_status_counts_and_imported_recent(tmp_db_path):
+    """status_counts groups by status; imported_recent counts imports since a cutoff (REL-03)."""
+    conn = connect(tmp_db_path)
+    run_migrations(conn)
+    upsert_gap(conn, _gap(arr_id="1"))
+    upsert_gap(conn, _gap(arr_id="2"))
+    upsert_gap(conn, _gap(arr_id="3"))
+    set_status(conn, "lidarr", "2", "imported")
+    set_status(conn, "lidarr", "3", "stuck")
+    counts = status_counts(conn)
+    assert counts.get("pending") == 1
+    assert counts.get("imported") == 1
+    assert counts.get("stuck") == 1
+    # imported_recent: row "2" was just upserted (last_seen_at = now), so it counts since epoch.
+    assert imported_recent(conn, "1970-01-01T00:00:00Z") == 1
+    assert imported_recent(conn, "2999-01-01T00:00:00Z") == 0
+    conn.close()

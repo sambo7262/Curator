@@ -11,7 +11,7 @@
 import json
 import sqlite3
 from datetime import datetime, timezone
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 def _now_iso() -> str:
@@ -122,3 +122,111 @@ def record_quarantine(
         " WHERE id = ?",
         (quarantine_path, reason, _now_iso(), staged_file_id),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — autonomy DAOs: eligibility select, backoff schedule, attempt mutator,
+# and the status-page counters. The scheduler READS/WRITES exclusively through these.
+# Every value below is bound via `?` placeholders (never f-stringed) and every timestamp
+# flows through _now_iso() so the eligibility comparisons stay lexicographically correct
+# against the Z-suffixed ISO8601 strings stored in the ledger. [T-05-02]
+# ---------------------------------------------------------------------------
+
+# D-08: exponential retry backoff, capped. attempt 1 -> 1h, attempt 2 -> 6h, attempt 3+ -> 24h.
+BACKOFF_SECONDS: List[int] = [3600, 21600, 86400]
+
+
+def backoff_for(attempt_count: int) -> int:
+    """Return the next-retry delay (seconds) for a given attempt count (D-08, capped 1h->6h->24h).
+
+    Pure function: clamps the attempt into [1, len(BACKOFF_SECONDS)] so a 0/negative count maps to
+    the first rung and any count past the ladder length stays pinned at the 24h ceiling — it never
+    raises and never grows unbounded.
+    """
+    idx = min(max(attempt_count, 1), len(BACKOFF_SECONDS)) - 1
+    return BACKOFF_SECONDS[idx]
+
+
+def select_eligible(
+    conn: sqlite3.Connection,
+    grace_cutoff: str,
+    now: str,
+    dormant_cutoff: str,
+    room: int,
+) -> List[sqlite3.Row]:
+    """Return the items the scheduler may act on THIS cycle, oldest-first, capped at `room`.
+
+    Two eligibility branches (GAP-03 grace + D-08 backoff + D-09 dormant re-check):
+
+    1. A retryable item (`pending`/`stuck`/`quarantined`) is eligible iff its grace window has
+       elapsed (`discovered_at <= grace_cutoff`, GAP-03 — the existing ~1493-row backlog is already
+       past grace at launch because the upsert never clobbers discovered_at) AND its backoff has
+       elapsed (`next_attempt_at IS NULL OR next_attempt_at <= now`, D-08). `stuck` AND `quarantined`
+       ARE retry-eligible — that retry IS the backoff mechanism (OQ-2 resolved per D-08).
+    2. A `permanently-unavailable` item re-enters the pool once its 30-day dormant TTL has elapsed
+       (`last_checked_at IS NULL OR last_checked_at <= dormant_cutoff`, D-09) — a new uploader may
+       have appeared.
+
+    Ordered `discovered_at ASC` (oldest gaps drain first, fairly). `LIMIT room` is the per-cycle
+    flood control over the backlog (T-05-03): the SQL itself caps the result set so a single cycle
+    can never fan out beyond the caller's available concurrency budget.
+
+    Terminal/in-flight states (`imported`/`searching`/`downloading`/`importing`/`unavailable`/
+    `blacklisted`/`grabbed`/`downloaded`) are never selected — Curator never re-acts on a satisfied
+    or in-flight item.
+    """
+    return conn.execute(
+        """
+        SELECT * FROM items
+        WHERE (
+            status IN ('pending', 'stuck', 'quarantined')
+            AND discovered_at <= ?
+            AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+        ) OR (
+            status = 'permanently-unavailable'
+            AND (last_checked_at IS NULL OR last_checked_at <= ?)
+        )
+        ORDER BY discovered_at ASC
+        LIMIT ?
+        """,
+        (grace_cutoff, now, dormant_cutoff, room),
+    ).fetchall()
+
+
+def record_attempt(
+    conn: sqlite3.Connection,
+    arr_app: str,
+    arr_id: str,
+    attempt_count: int,
+    next_attempt_at: Optional[str],
+    status: str,
+) -> None:
+    """Stamp an item's attempt counter, backoff gate, status, and last-checked time (D-07/D-08/D-09).
+
+    `last_checked_at` is set to `_now_iso()` (the dormant re-check anchor). The caller computes
+    `attempt_count` (+1 on a genuine failure, reset to 0 on import), `next_attempt_at`
+    (now + backoff_for(attempt) or the 30-day dormant anchor at give-up), and the resulting `status`.
+    All values `?`-bound; an out-of-enum status is rejected by the schema CHECK (IntegrityError).
+    """
+    conn.execute(
+        "UPDATE items"
+        " SET attempt_count = ?, next_attempt_at = ?, last_checked_at = ?, status = ?"
+        " WHERE arr_app = ? AND arr_id = ?",
+        (attempt_count, next_attempt_at, _now_iso(), status, arr_app, arr_id),
+    )
+
+
+def status_counts(conn: sqlite3.Connection) -> Dict[str, int]:
+    """Return {status: count} across the ledger — the header counts for the status page (REL-03)."""
+    rows = conn.execute(
+        "SELECT status, COUNT(*) AS n FROM items GROUP BY status"
+    ).fetchall()
+    return {row["status"]: row["n"] for row in rows}
+
+
+def imported_recent(conn: sqlite3.Connection, since_iso: str) -> int:
+    """Count items imported since `since_iso` — the healthy-throughput signal for the status page."""
+    return conn.execute(
+        "SELECT COUNT(*) FROM items WHERE status = 'imported' AND last_seen_at >= ?",
+        (since_iso,),
+    ).fetchone()[0]
