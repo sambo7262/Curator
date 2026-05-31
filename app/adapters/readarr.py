@@ -8,12 +8,32 @@
 # (A-R1/A-R2). The defensive _map tolerates both profile-id spellings; a wrong guess skips a book,
 # it does not crash. *arr field names live HERE (the firewall), never in core/state.
 import logging
+from typing import Optional
 
 import httpx
 
 from adapters.base import GapItem
+from core.manifest import Manifest
+from core.quality import Profile
 
 log = logging.getLogger(__name__)
+
+# Book quality NAME -> a neutral format ladder (worst -> best): PDF < MOBI < AZW3 < EPUB. These ints
+# ride the SAME neutral Profile type as music (core has no book-specific vocabulary). This map is the
+# firewall boundary for books: the Readarr quality-name vocabulary lives ONLY here. [A-R2: best-effort]
+_BOOK_FORMAT_RANKS = {
+    "pdf": 1,
+    "mobi": 2,
+    "azw3": 3,
+    "epub": 4,
+}
+
+
+def _book_rank_for_name(name: Optional[str]) -> Optional[int]:
+    """Map a Readarr book-format quality NAME to a neutral rank, or None if unknown (defensive)."""
+    if not isinstance(name, str):
+        return None
+    return _BOOK_FORMAT_RANKS.get(name.strip().lower())
 
 
 class ReadarrAdapter:
@@ -117,3 +137,77 @@ class ReadarrAdapter:
         except (KeyError, TypeError, ValueError) as e:
             log.warning("skipping malformed readarr record: %s", e)
             return None
+
+    # An empty allowed-set Profile: the BEST-EFFORT safe default when a book profile cannot be read.
+    # An empty `allowed` makes the gate reject every candidate (a book whose profile we can't resolve
+    # is simply never acquired) rather than crashing the loop or over-permitting (ARR-02 fail-safe).
+    _SAFE_DEFAULT_PROFILE = Profile(allowed=frozenset(), cutoff_rank=1)
+
+    def get_quality_profile(self, profile_id: int) -> Profile:
+        """BEST-EFFORT (ARR-02): GET the Readarr book quality profile and normalize to a neutral
+        Profile over the book-format ladder. ANY fault (HTTP / JSON / unexpected shape) is swallowed
+        to the empty-allowed safe default — a Readarr profile fault must NEVER raise into the loop and
+        must NEVER gate music. Tolerates both nested `{"quality": {...}}` and bare-quality item shapes.
+        """
+        try:
+            r = self._client.get(
+                f"{self._base}/api/v1/qualityprofile/{profile_id}",
+                headers=self._headers,
+                timeout=30.0,
+            )
+            r.raise_for_status()
+            body = r.json()
+            if not isinstance(body, dict):
+                return self._SAFE_DEFAULT_PROFILE
+
+            allowed, id_to_rank = set(), {}
+            for item in body.get("items") or []:
+                if not isinstance(item, dict):
+                    continue
+                q = item.get("quality") if isinstance(item.get("quality"), dict) else item
+                q = q or {}
+                rank = _book_rank_for_name(q.get("name"))
+                if rank is not None and q.get("id") is not None:
+                    id_to_rank[q.get("id")] = rank
+                if item.get("allowed") and rank is not None:
+                    allowed.add(rank)
+
+            cutoff = body.get("cutoff")
+            if isinstance(cutoff, dict):
+                cutoff = cutoff.get("id")
+            cutoff_rank = id_to_rank.get(cutoff) or (min(allowed) if allowed else 1)
+            return Profile(allowed=frozenset(allowed), cutoff_rank=cutoff_rank)
+        except (httpx.HTTPError, ValueError, TypeError, KeyError) as e:
+            log.warning("readarr get_quality_profile(%s) degraded -> safe default: %s", profile_id, e)
+            return self._SAFE_DEFAULT_PROFILE
+
+    def get_manifest(self, foreign_id: str) -> Manifest:
+        """BEST-EFFORT (ARR-02): build a neutral book Manifest (author->artist, title->album,
+        track_count=1, track_titles=None, kind='book') from the Readarr book record. ANY fault is
+        swallowed to a stub-safe empty Manifest — a manifest fault degrades the single book, it never
+        raises into the loop and never gates music. A book is one file, so track_count is always 1.
+        """
+        try:
+            r = self._client.get(
+                f"{self._base}/api/v1/book",
+                headers=self._headers,
+                params={"foreignBookId": foreign_id},
+                timeout=30.0,
+            )
+            r.raise_for_status()
+            payload = r.json()
+            rec = payload[0] if isinstance(payload, list) and payload else payload
+            if not isinstance(rec, dict):
+                rec = {}
+            author = rec.get("author") or {}
+            return Manifest(
+                artist=author.get("authorName") or "",
+                album=rec.get("title") or "",
+                track_count=1,                 # a book is a single item — track-count doesn't apply
+                track_titles=None,             # omit the per-track sub-distance (graceful)
+                kind="book",
+                year=rec.get("releaseYear") if isinstance(rec.get("releaseYear"), int) else None,
+            )
+        except (httpx.HTTPError, ValueError, TypeError, KeyError) as e:
+            log.warning("readarr get_manifest(%s) degraded -> empty book manifest: %s", foreign_id, e)
+            return Manifest(artist="", album="", track_count=1, track_titles=None, kind="book")

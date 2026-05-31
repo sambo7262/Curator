@@ -16,6 +16,8 @@ import httpx
 
 from adapters.breaker import CircuitBreaker
 from adapters.readarr import ReadarrAdapter
+from core.manifest import Manifest
+from core.quality import Profile
 
 
 def _adapter(client) -> ReadarrAdapter:
@@ -134,3 +136,81 @@ def test_breaker_stays_open_during_cooldown():
     for _ in range(3):
         assert breaker.get_wanted() == []
     assert calls["n"] == attempts_at_open   # inner never attempted during cooldown
+
+
+# === Phase 3: best-effort get_quality_profile / get_manifest degrade, never gate music (ARR-02) ===
+
+def test_get_quality_profile_normalizes_book_formats():
+    """A Readarr book profile (EPUB+AZW3 allowed, cutoff=AZW3) maps to a neutral book-format Profile."""
+    arr_json = {
+        "id": 1, "name": "ebook",
+        "cutoff": 30,   # AZW3 id
+        "items": [
+            {"allowed": True,  "quality": {"id": 40, "name": "EPUB"}},
+            {"allowed": True,  "quality": {"id": 30, "name": "AZW3"}},
+            {"allowed": False, "quality": {"id": 10, "name": "PDF"}},
+        ],
+    }
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if "/api/v1/qualityprofile/" in request.url.path:
+            return httpx.Response(200, json=arr_json)
+        return httpx.Response(404, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    prof = _adapter(client).get_quality_profile(1)
+    assert isinstance(prof, Profile)
+    assert prof.allowed == frozenset({4, 3})   # EPUB(4) + AZW3(3)
+    assert prof.cutoff_rank == 3               # AZW3
+
+
+def test_get_quality_profile_degrades_on_fault_never_raises():
+    """ARR-02: a 5xx / garbage profile response degrades to the empty-allowed safe default, no raise.
+
+    An empty allowed-set means the book is simply never acquired — it NEVER gates music and NEVER
+    propagates a fault into the loop (the load-bearing best-effort guarantee)."""
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "readarr down"})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    prof = _adapter(client).get_quality_profile(7)   # must NOT raise
+    assert isinstance(prof, Profile)
+    assert prof.allowed == frozenset()
+
+
+def test_get_manifest_maps_book_to_neutral_manifest():
+    """A book record maps author->artist, title->album, track_count=1, kind='book'."""
+    book_json = [{"title": "Dune", "author": {"authorName": "Frank Herbert"}, "releaseYear": 1965}]
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/v1/book"):
+            return httpx.Response(200, json=book_json)
+        return httpx.Response(404, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    man = _adapter(client).get_manifest("foreign-book-1")
+    assert isinstance(man, Manifest)
+    assert man.artist == "Frank Herbert"
+    assert man.album == "Dune"
+    assert man.kind == "book"
+    assert man.track_count == 1
+    assert man.track_titles is None
+
+
+def test_get_manifest_degrades_on_fault_never_raises():
+    """ARR-02: a manifest fault degrades to a stub-safe empty book Manifest, never raising into the loop."""
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "down"})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    man = _adapter(client).get_manifest("x")   # must NOT raise
+    assert isinstance(man, Manifest)
+    assert man.kind == "book"
+    assert man.track_count == 1
+
+
+def test_readarr_now_exposes_profile_and_manifest_methods(httpx_client):
+    """Both new Phase-3 methods are callable on the concrete Readarr adapter (Protocol conformance)."""
+    adapter = _adapter(httpx_client({}))
+    assert callable(adapter.get_quality_profile)
+    assert callable(adapter.get_manifest)
