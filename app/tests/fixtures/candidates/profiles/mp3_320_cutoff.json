@@ -1,0 +1,5 @@
+{
+  "_doc": "Normalized neutral Profile: MP3-320 cutoff. allowed = MP3-320(3) + ALAC(4) + FLAC(5); cutoff at MP3-320 rank 3. A profile-acceptable lossy candidate (MP3 ~320) PASSES here (QUAL-02 permit direction); MP3-256/192 (ranks 1-2) are below cutoff and rejected.",
+  "allowed": [3, 4, 5],
+  "cutoff_rank": 3
+}

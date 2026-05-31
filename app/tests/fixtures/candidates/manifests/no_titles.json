@@ -1,0 +1,9 @@
+{
+  "_doc": "Normalized neutral Manifest with track_titles OMITTED (null) — the graceful-omission path: the matcher skips the track-title sub-distance entirely and leans on track_count. Target for wrong_album (track_titles unavailable for that target) and the title-less coverage case.",
+  "artist": "Boards of Canada",
+  "album": "Music Has the Right to Children",
+  "track_count": 17,
+  "track_titles": null,
+  "kind": "album",
+  "year": 1998
+}

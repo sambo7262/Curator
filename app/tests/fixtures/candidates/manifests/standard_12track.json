@@ -1,0 +1,22 @@
+{
+  "_doc": "Normalized neutral Manifest: a standard 12-track album with a full per-track title list. The ACCEPT-direction target for known_good_flac / known_good_alac / known_good_mp3_320 / borderline_accept / fake_flac / below_cutoff_mp3.",
+  "artist": "Radiohead",
+  "album": "OK Computer",
+  "track_count": 12,
+  "track_titles": [
+    "Airbag",
+    "Paranoid Android",
+    "Subterranean Homesick Alien",
+    "Exit Music (For a Film)",
+    "Let Down",
+    "Karma Police",
+    "Fitter Happier",
+    "Electioneering",
+    "Climbing Up the Walls",
+    "No Surprises",
+    "Lucky",
+    "The Tourist"
+  ],
+  "kind": "album",
+  "year": 1997
+}

@@ -1,0 +1,12 @@
+{
+  "_doc": "DECLINE and NEVER throw (error path): a folder name of meaningless garbage that release_parse must fold to None artist/album without crashing; the matcher then scores max-penalty distance -> DECLINE. Has audio files so it is not the no_audio_files case. Proves the garbage-input robustness branch. Scored vs standard_12track + lossless_only.",
+  "username": "junk_seeder",
+  "folder": "!!!___@@@   ___!!!",
+  "freeUploadSlots": 0,
+  "uploadSpeed": null,
+  "files": [
+    {"filename": "track1.flac", "size": 24000000, "extension": "flac", "bitRate": 870, "length": 250, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "track2.flac", "size": 26000000, "extension": "flac", "bitRate": 875, "length": 270, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "track3.flac", "size": 25000000, "extension": "flac", "bitRate": 865, "length": 260, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true}
+  ]
+}

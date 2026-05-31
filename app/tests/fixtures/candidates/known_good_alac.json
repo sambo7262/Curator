@@ -1,0 +1,21 @@
+{
+  "_doc": "ACCEPT: correct artist/album, complete 12 tracks, lossless ALAC (.m4a). Scored vs standard_12track manifest + lossless_only profile (ALAC is in the allowed set + at/above cutoff).",
+  "username": "alac_seeder",
+  "folder": "Radiohead - OK Computer (1997) [ALAC]",
+  "freeUploadSlots": 1,
+  "uploadSpeed": 300000,
+  "files": [
+    {"filename": "01 - Airbag.m4a", "size": 23000000, "extension": "m4a", "bitRate": 850, "length": 284, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "02 - Paranoid Android.m4a", "size": 31000000, "extension": "m4a", "bitRate": 840, "length": 383, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "03 - Subterranean Homesick Alien.m4a", "size": 26000000, "extension": "m4a", "bitRate": 830, "length": 287, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "04 - Exit Music (For a Film).m4a", "size": 25000000, "extension": "m4a", "bitRate": 825, "length": 264, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "05 - Let Down.m4a", "size": 29000000, "extension": "m4a", "bitRate": 845, "length": 299, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "06 - Karma Police.m4a", "size": 27000000, "extension": "m4a", "bitRate": 835, "length": 261, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "07 - Fitter Happier.m4a", "size": 11000000, "extension": "m4a", "bitRate": 780, "length": 117, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "08 - Electioneering.m4a", "size": 24000000, "extension": "m4a", "bitRate": 820, "length": 230, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "09 - Climbing Up the Walls.m4a", "size": 28000000, "extension": "m4a", "bitRate": 845, "length": 285, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "10 - No Surprises.m4a", "size": 25000000, "extension": "m4a", "bitRate": 815, "length": 229, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "11 - Lucky.m4a", "size": 26000000, "extension": "m4a", "bitRate": 835, "length": 259, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "12 - The Tourist.m4a", "size": 27000000, "extension": "m4a", "bitRate": 840, "length": 326, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true}
+  ]
+}

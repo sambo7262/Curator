@@ -1,0 +1,19 @@
+{
+  "_doc": "DECLINE (wrong album): correct artist (Radiohead) but a DIFFERENT album (Kid A) than the standard_12track manifest (OK Computer). Genuine FLAC, complete-ish. Scored vs standard_12track + lossless_only. The album sub-distance is large -> total > strong_thresh.",
+  "username": "wrong_seeder",
+  "folder": "Radiohead - Kid A (2000) [FLAC]",
+  "freeUploadSlots": 2,
+  "uploadSpeed": 350000,
+  "files": [
+    {"filename": "01 - Everything in Its Right Place.flac", "size": 24000000, "extension": "flac", "bitRate": 880, "length": 251, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "02 - Kid A.flac", "size": 28000000, "extension": "flac", "bitRate": 870, "length": 304, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "03 - The National Anthem.flac", "size": 30000000, "extension": "flac", "bitRate": 885, "length": 351, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "04 - How to Disappear Completely.flac", "size": 35000000, "extension": "flac", "bitRate": 890, "length": 356, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "05 - Treefingers.flac", "size": 22000000, "extension": "flac", "bitRate": 850, "length": 222, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "06 - Optimistic.flac", "size": 29000000, "extension": "flac", "bitRate": 880, "length": 316, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "07 - In Limbo.flac", "size": 27000000, "extension": "flac", "bitRate": 875, "length": 211, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "08 - Idioteque.flac", "size": 28000000, "extension": "flac", "bitRate": 880, "length": 290, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "09 - Morning Bell.flac", "size": 26000000, "extension": "flac", "bitRate": 870, "length": 269, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "10 - Motion Picture Soundtrack.flac", "size": 33000000, "extension": "flac", "bitRate": 885, "length": 419, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true}
+  ]
+}

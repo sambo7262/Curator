@@ -1,0 +1,5 @@
+{
+  "_doc": "Normalized neutral Profile (NOT raw *arr JSON): lossless-only. allowed = ALAC(4) + FLAC(5); cutoff at FLAC-rank 5 so any lossy file is below cutoff and rejected (no-downgrade).",
+  "allowed": [4, 5],
+  "cutoff_rank": 5
+}

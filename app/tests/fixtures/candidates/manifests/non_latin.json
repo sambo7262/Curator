@@ -1,0 +1,20 @@
+{
+  "_doc": "Normalized neutral Manifest with diacritic/non-Latin artist+album — proves NFKD folding lets a correctly-named non-Latin candidate ACCEPT. Target for the non_latin candidate.",
+  "artist": "Björk",
+  "album": "Homogénic",
+  "track_count": 10,
+  "track_titles": [
+    "Hunter",
+    "Jóga",
+    "Unravel",
+    "Bachelorette",
+    "All Neon Like",
+    "5 Years",
+    "Immature",
+    "Alarm Call",
+    "Pluto",
+    "All Is Full of Love"
+  ],
+  "kind": "album",
+  "year": 1997
+}

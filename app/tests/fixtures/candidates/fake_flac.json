@@ -1,0 +1,21 @@
+{
+  "_doc": "DECLINE (fake/transcoded FLAC): files claim .flac but effective bytes-per-second is ~128 kbps (size*8/length/1000 well below the 400 kbps floor) — a low-bitrate lossy source re-wrapped as FLAC. Correct/complete album otherwise, so ONLY the fakeflac check should reject it (proves fakeflac is load-bearing, not the matcher). Folder also carries a lossy source token. Scored vs standard_12track + lossless_only.",
+  "username": "fake_seeder",
+  "folder": "Radiohead - OK Computer (1997) [FLAC] (mp3 source)",
+  "freeUploadSlots": 5,
+  "uploadSpeed": 900000,
+  "files": [
+    {"filename": "01 - Airbag.flac", "size": 4544000, "extension": "flac", "bitRate": 128, "length": 284, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": false},
+    {"filename": "02 - Paranoid Android.flac", "size": 6128000, "extension": "flac", "bitRate": 128, "length": 383, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": false},
+    {"filename": "03 - Subterranean Homesick Alien.flac", "size": 4592000, "extension": "flac", "bitRate": 128, "length": 287, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": false},
+    {"filename": "04 - Exit Music (For a Film).flac", "size": 4224000, "extension": "flac", "bitRate": 128, "length": 264, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": false},
+    {"filename": "05 - Let Down.flac", "size": 4784000, "extension": "flac", "bitRate": 128, "length": 299, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": false},
+    {"filename": "06 - Karma Police.flac", "size": 4176000, "extension": "flac", "bitRate": 128, "length": 261, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": false},
+    {"filename": "07 - Fitter Happier.flac", "size": 1872000, "extension": "flac", "bitRate": 128, "length": 117, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": false},
+    {"filename": "08 - Electioneering.flac", "size": 3680000, "extension": "flac", "bitRate": 128, "length": 230, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": false},
+    {"filename": "09 - Climbing Up the Walls.flac", "size": 4560000, "extension": "flac", "bitRate": 128, "length": 285, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": false},
+    {"filename": "10 - No Surprises.flac", "size": 3664000, "extension": "flac", "bitRate": 128, "length": 229, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": false},
+    {"filename": "11 - Lucky.flac", "size": 4144000, "extension": "flac", "bitRate": 128, "length": 259, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": false},
+    {"filename": "12 - The Tourist.flac", "size": 5216000, "extension": "flac", "bitRate": 128, "length": 326, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": false}
+  ]
+}

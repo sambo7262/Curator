@@ -1,0 +1,32 @@
+{
+  "_doc": "DECLINE (wrong edition / track-count mismatch): the Deluxe edition of OK Computer (OKNOTOK) with 23 tracks vs the manifest's 12. Correct artist+album name, genuine FLAC, but the edition inflates track_count far beyond the manifest -> track_count sub-distance pushes total > strong_thresh. Curator declines the long-tail edition rather than grabbing the wrong release. Scored vs standard_12track + lossless_only.",
+  "username": "deluxe_seeder",
+  "folder": "Radiohead - OK Computer OKNOTOK (1997) [Deluxe] [FLAC]",
+  "freeUploadSlots": 1,
+  "uploadSpeed": 280000,
+  "files": [
+    {"filename": "01 - Airbag.flac", "size": 24000000, "extension": "flac", "bitRate": 900, "length": 284, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "02 - Paranoid Android.flac", "size": 32000000, "extension": "flac", "bitRate": 880, "length": 383, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "03 - Subterranean Homesick Alien.flac", "size": 27000000, "extension": "flac", "bitRate": 870, "length": 287, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "04 - Exit Music (For a Film).flac", "size": 26000000, "extension": "flac", "bitRate": 860, "length": 264, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "05 - Let Down.flac", "size": 30000000, "extension": "flac", "bitRate": 890, "length": 299, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "06 - Karma Police.flac", "size": 28000000, "extension": "flac", "bitRate": 875, "length": 261, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "07 - Fitter Happier.flac", "size": 12000000, "extension": "flac", "bitRate": 820, "length": 117, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "08 - Electioneering.flac", "size": 25000000, "extension": "flac", "bitRate": 865, "length": 230, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "09 - Climbing Up the Walls.flac", "size": 29000000, "extension": "flac", "bitRate": 885, "length": 285, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "10 - No Surprises.flac", "size": 26000000, "extension": "flac", "bitRate": 850, "length": 229, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "11 - Lucky.flac", "size": 27000000, "extension": "flac", "bitRate": 870, "length": 259, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "12 - The Tourist.flac", "size": 28000000, "extension": "flac", "bitRate": 875, "length": 326, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "13 - I Promise.flac", "size": 24000000, "extension": "flac", "bitRate": 860, "length": 255, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "14 - Man of War.flac", "size": 29000000, "extension": "flac", "bitRate": 875, "length": 308, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "15 - Lift.flac", "size": 28000000, "extension": "flac", "bitRate": 870, "length": 268, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "16 - Lull.flac", "size": 12000000, "extension": "flac", "bitRate": 820, "length": 126, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "17 - Meeting in the Aisle.flac", "size": 18000000, "extension": "flac", "bitRate": 840, "length": 188, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "18 - Melatonin.flac", "size": 12000000, "extension": "flac", "bitRate": 820, "length": 128, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "19 - A Reminder.flac", "size": 22000000, "extension": "flac", "bitRate": 850, "length": 235, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "20 - Polyethylene.flac", "size": 25000000, "extension": "flac", "bitRate": 860, "length": 252, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "21 - Pearly.flac", "size": 24000000, "extension": "flac", "bitRate": 855, "length": 236, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "22 - Palo Alto.flac", "size": 23000000, "extension": "flac", "bitRate": 850, "length": 224, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "23 - How I Made My Millions.flac", "size": 20000000, "extension": "flac", "bitRate": 845, "length": 203, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true}
+  ]
+}

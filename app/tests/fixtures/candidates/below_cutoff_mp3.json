@@ -1,0 +1,21 @@
+{
+  "_doc": "DECLINE (quality REJECT direction — QUAL-02 no-downgrade): correct/complete album but MP3 at 192 kbps (rank 1), which is BELOW cutoff in BOTH profiles — below mp3_320_cutoff (cutoff rank 3) AND not in lossless_only's allowed set. This is the REJECT half of the QUAL-02 boundary straddle, paired with known_good_mp3_320 (the PERMIT half) to prove both directions. The matcher would otherwise ACCEPT it, so ONLY the quality gate declines it.",
+  "username": "lowbit_seeder",
+  "folder": "Radiohead - OK Computer (1997) [MP3 192]",
+  "freeUploadSlots": 4,
+  "uploadSpeed": 600000,
+  "files": [
+    {"filename": "01 - Airbag.mp3", "size": 6816000, "extension": "mp3", "bitRate": 192, "length": 284, "sampleRate": 44100, "bitDepth": null, "isVariableBitRate": false},
+    {"filename": "02 - Paranoid Android.mp3", "size": 9192000, "extension": "mp3", "bitRate": 192, "length": 383, "sampleRate": 44100, "bitDepth": null, "isVariableBitRate": false},
+    {"filename": "03 - Subterranean Homesick Alien.mp3", "size": 6888000, "extension": "mp3", "bitRate": 192, "length": 287, "sampleRate": 44100, "bitDepth": null, "isVariableBitRate": false},
+    {"filename": "04 - Exit Music (For a Film).mp3", "size": 6336000, "extension": "mp3", "bitRate": 192, "length": 264, "sampleRate": 44100, "bitDepth": null, "isVariableBitRate": false},
+    {"filename": "05 - Let Down.mp3", "size": 7176000, "extension": "mp3", "bitRate": 192, "length": 299, "sampleRate": 44100, "bitDepth": null, "isVariableBitRate": false},
+    {"filename": "06 - Karma Police.mp3", "size": 6264000, "extension": "mp3", "bitRate": 192, "length": 261, "sampleRate": 44100, "bitDepth": null, "isVariableBitRate": false},
+    {"filename": "07 - Fitter Happier.mp3", "size": 2808000, "extension": "mp3", "bitRate": 192, "length": 117, "sampleRate": 44100, "bitDepth": null, "isVariableBitRate": false},
+    {"filename": "08 - Electioneering.mp3", "size": 5520000, "extension": "mp3", "bitRate": 192, "length": 230, "sampleRate": 44100, "bitDepth": null, "isVariableBitRate": false},
+    {"filename": "09 - Climbing Up the Walls.mp3", "size": 6840000, "extension": "mp3", "bitRate": 192, "length": 285, "sampleRate": 44100, "bitDepth": null, "isVariableBitRate": false},
+    {"filename": "10 - No Surprises.mp3", "size": 5496000, "extension": "mp3", "bitRate": 192, "length": 229, "sampleRate": 44100, "bitDepth": null, "isVariableBitRate": false},
+    {"filename": "11 - Lucky.mp3", "size": 6216000, "extension": "mp3", "bitRate": 192, "length": 259, "sampleRate": 44100, "bitDepth": null, "isVariableBitRate": false},
+    {"filename": "12 - The Tourist.mp3", "size": 7824000, "extension": "mp3", "bitRate": 192, "length": 326, "sampleRate": 44100, "bitDepth": null, "isVariableBitRate": false}
+  ]
+}

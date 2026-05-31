@@ -1,0 +1,13 @@
+{
+  "_doc": "DECLINE (immediate, zero audio files): a folder whose files are all non-audio (.cue/.log/.jpg/.nfo/.txt) — audio_file_count == 0, the immediate-decline path. Even with a correct-looking folder name there is nothing to import. Scored vs standard_12track + lossless_only.",
+  "username": "empty_seeder",
+  "folder": "Radiohead - OK Computer (1997) [FLAC]",
+  "freeUploadSlots": 2,
+  "uploadSpeed": 300000,
+  "files": [
+    {"filename": "OK Computer.cue", "size": 2400, "extension": "cue", "bitRate": null, "length": null, "sampleRate": null, "bitDepth": null, "isVariableBitRate": null},
+    {"filename": "OK Computer.log", "size": 18000, "extension": "log", "bitRate": null, "length": null, "sampleRate": null, "bitDepth": null, "isVariableBitRate": null},
+    {"filename": "folder.jpg", "size": 540000, "extension": "jpg", "bitRate": null, "length": null, "sampleRate": null, "bitDepth": null, "isVariableBitRate": null},
+    {"filename": "info.nfo", "size": 3200, "extension": "nfo", "bitRate": null, "length": null, "sampleRate": null, "bitDepth": null, "isVariableBitRate": null}
+  ]
+}

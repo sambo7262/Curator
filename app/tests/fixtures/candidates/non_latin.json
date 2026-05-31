@@ -1,0 +1,19 @@
+{
+  "_doc": "ACCEPT when correct: a non-Latin/diacritic folder that NFKD-folds to match the non_latin manifest (Björk - Homogénic), complete 10 tracks, genuine FLAC. Proves unicode/transliteration robustness. Scored vs non_latin manifest + lossless_only.",
+  "username": "intl_seeder",
+  "folder": "Björk - Homogénic (1997) [FLAC]",
+  "freeUploadSlots": 2,
+  "uploadSpeed": 400000,
+  "files": [
+    {"filename": "01 - Hunter.flac", "size": 25000000, "extension": "flac", "bitRate": 870, "length": 256, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "02 - Jóga.flac", "size": 26000000, "extension": "flac", "bitRate": 875, "length": 305, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "03 - Unravel.flac", "size": 24000000, "extension": "flac", "bitRate": 860, "length": 240, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "04 - Bachelorette.flac", "size": 31000000, "extension": "flac", "bitRate": 885, "length": 320, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "05 - All Neon Like.flac", "size": 33000000, "extension": "flac", "bitRate": 890, "length": 345, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "06 - 5 Years.flac", "size": 28000000, "extension": "flac", "bitRate": 880, "length": 254, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "07 - Immature.flac", "size": 18000000, "extension": "flac", "bitRate": 840, "length": 187, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "08 - Alarm Call.flac", "size": 26000000, "extension": "flac", "bitRate": 870, "length": 256, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "09 - Pluto.flac", "size": 27000000, "extension": "flac", "bitRate": 875, "length": 280, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true},
+    {"filename": "10 - All Is Full of Love.flac", "size": 30000000, "extension": "flac", "bitRate": 885, "length": 267, "sampleRate": 44100, "bitDepth": 16, "isVariableBitRate": true}
+  ]
+}
