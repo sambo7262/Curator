@@ -93,6 +93,16 @@ services:
       READARR_API_KEY: "${READARR_API_KEY}"
       DB_PATH: "/db/curator.sqlite"        # SQLite-WAL ledger on its OWN mount (NOT under /data) — Phase 2 (STATE-01)
       TZ: "${TZ}"
+      # Phase-5 autonomy tunables (DEPLOY.md Step 9). MUST be forwarded here or .env edits are inert —
+      # Settings.from_env() reads the container env, and compose only injects what it maps. Defaults
+      # mirror config.py so an unset .env behaves identically to the image defaults.
+      ACQ_ENABLED: "${ACQ_ENABLED:-true}"                            # kill-switch (re-read each cycle)
+      ACQ_DRY_RUN: "${ACQ_DRY_RUN:-false}"                           # true = search/gate/log only, zero side effects
+      MAX_CONCURRENT: "${MAX_CONCURRENT:-3}"                         # simultaneous-acquisition cap (start rollout at 1)
+      ACQ_POLL_INTERVAL_SECONDS: "${ACQ_POLL_INTERVAL_SECONDS:-21600}"   # daemon cadence (6h)
+      ACQ_GRACE_SECONDS: "${ACQ_GRACE_SECONDS:-259200}"             # Usenet-politeness grace from discovered_at (3d)
+      ACQ_MAX_ATTEMPTS: "${ACQ_MAX_ATTEMPTS:-3}"                     # genuine-failure attempts -> permanently-unavailable
+      ACQ_DORMANT_SECONDS: "${ACQ_DORMANT_SECONDS:-2592000}"        # dormant re-check TTL (30d)
     ports:
       - "8674:8674"                        # Curator status/health endpoint (LAN/Tailscale only — never WAN)
     volumes:
