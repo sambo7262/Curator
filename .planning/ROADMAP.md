@@ -13,7 +13,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 - [x] **Phase 1: VPN-Routed Networking Foundation** - gluetun+PIA tunnel (kill-switch, non-US PF, firewall subnets), slskd routed through it and reachable on synobridge, single shared `/data` mount, deployed from compose pulling a CI-built image ✓ *deployed & verified on NAS 2026-05-30 (slskd logged into Soulseek via PIA Vancouver, port 56034)*
 - [x] **Phase 2: State Ledger + *arr Adapter + Gap Detection** - SQLite spine plus a `*-arr`-agnostic adapter that detects monitored missing/cutoff gaps and dedups them, with Readarr isolated behind the seam ✓ *all 4 plans complete 2026-05-30; detection wired end-to-end with dedup + Readarr-no-gate proven*
 - [x] **Phase 3: Matching & Quality Gating** - candidates scored against authoritative identity and filtered by `*arr` profile/cutoff (incl. fake-FLAC heuristics), rejecting wrong/low-quality matches before any download ✓ *all 5 plans complete 2026-05-30; gate.evaluate composes the corpus end-to-end (QUAL-02 both directions), firewall holds over all 8 core modules*
-- [ ] **Phase 4: Acquisition, Staging & Clean Import** - eligible gaps are searched, downloaded into an isolated quarantine dir, imported (wanted files only) via Manual Import, verified into the library + Plex, then the staging dir is auto-purged
+- [x] **Phase 4: Acquisition, Staging & Clean Import** - eligible gaps are searched, downloaded into an isolated quarantine dir, imported (wanted files only) via Manual Import, verified into the library, then the staging dir is auto-purged ✓ *all 5 plans complete 2026-05-31; the single-item acquisition loop is pinned to the live slskd/Lidarr reality (A1 ManualImport `move` envelope, A2 remote-folder-leaf landing, A3 `Completed, Succeeded` terminal rule), offline suite 205 passed, firewall intact*
 - [ ] **Phase 5: Autonomy, Sharing & Self-Recovery** - the grace-gated daemon runs hands-off with backoff/do-not-retry, slskd shares real library content to stay unblocked, and the loop self-recovers and surfaces stuck items
 - [ ] **Phase 6: Observability & Notifications** - a Homepage-consumable JSON status endpoint and Apprise push notifications make the hands-off system glanceable and event-aware
 
@@ -79,7 +79,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 - [x] 04-02-PLAN.md — Wave 0: thin SlskdClient (search/enqueue/watch/cancel, X-API-Key) + staging.py path-traversal guard + purge/quarantine/TTL helpers [ACQ-01, ACQ-02, ACQ-03, IMPORT-01, IMPORT-05] ✓ (172 passed)
 - [x] 04-03-PLAN.md — Wave 1: *arr-agnostic import methods (Lidarr ManualImport-Move + verify-by-requery; Readarr best-effort swallow->safe-default). NO Plex (D-04 revised — Curator does not call Plex; IMPORT-04 is the owner's external auto-scan precondition) [IMPORT-02, IMPORT-03, IMPORT-05] ✓ (185 passed)
 - [x] 04-04-PLAN.md — Wave 2: core/acquire.py composition loop (search→gate→download→stall-watch→import→verify→purge/quarantine, D-01..D-10; NO Plex — IMPORT-04 external per revised D-04) + firewall grep over acquire.py [ACQ-01/02/03, IMPORT-01/02/03/05] ✓ (201 passed)
-- [ ] 04-05-PLAN.md — Wave 3: D-11 slskd-share precondition checkpoint + live NAS probes (A1 ManualImport envelope / A2 batchId / A3 transfer-state strings) + reconcile fixtures to reality [ACQ-02, ACQ-03, IMPORT-01, IMPORT-02]
+- [x] 04-05-PLAN.md — Wave 3: D-11 slskd-share precondition checkpoint + live NAS probes (A1 ManualImport envelope / A2 batchId / A3 transfer-state strings) + reconcile fixtures to reality [ACQ-02, ACQ-03, IMPORT-01, IMPORT-02] ✓ (205 passed) — A3 success=`Completed, Succeeded`+robust rule; A2 no-batchId→staging_root/<leaf-of-remote-folder>; A1 importMode lowercase `move`, no per-file downloadId
 
 ### Phase 5: Autonomy, Sharing & Self-Recovery
 **Goal**: Make the closed loop run itself, indefinitely, and politely: a scheduled daemon processes only grace-elapsed, Usenet-clear gaps; exponential backoff plus permanent "unavailable" memory govern retries; slskd shares real read-only library content so the account is never leech-blocked; and the system self-recovers from transient Lidarr/Readarr/slskd/VPN outages (infra failures never burn an attempt) and surfaces genuinely-stuck items.
@@ -109,7 +109,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 | 1. VPN-Routed Networking Foundation | 4/4 | ✓ Complete (deployed & verified on NAS) | 2026-05-30 |
 | 2. State Ledger + *arr Adapter + Gap Detection | 4/4 | ✓ Complete | 2026-05-30 |
 | 3. Matching & Quality Gating | 5/5 | ✓ Complete | 2026-05-31 |
-| 4. Acquisition, Staging & Clean Import | 4/5 | Executing (Waves 0–2 ✓: 04-01..04-04; only 04-05 live test remains) | - |
+| 4. Acquisition, Staging & Clean Import | 5/5 | ✓ Complete (live-probe reconciliation pinned A1/A2/A3; 205 passed) | - |
 | 5. Autonomy, Sharing & Self-Recovery | 0/0 | Not started | - |
 | 6. Observability & Notifications | 0/0 | Not started | - |
 

@@ -93,3 +93,30 @@ Notes / anything surprising:
   `/api/v1/manualimport?folder=…` candidate response → execute_import echoes them back in the POST.
 - Command fields like `priority/status/queued/isExclusive/isLongRunning/id` are command-queue metadata
   added by Lidarr on accept — NOT part of the POST body Curator must send.
+
+---
+
+## Reconciliation (Task 3 — applied 2026-05-31)
+
+The offline code + fixtures are now pinned to the observations above:
+
+- **A3** — `app/adapters/slskd.py`: `STATE_COMPLETED_SUCCEEDED = "Completed, Succeeded"` (live-observed),
+  `[ASSUMED]` markers dropped. `transfer_progress` implements the robust rule: TERMINAL iff state
+  contains `"Completed"`, SUCCESS iff it also contains `"Succeeded"`, any other terminal `"Completed, *"`
+  → FAILURE. Named failure/cancelled constants retained as documentation (substring rule is
+  authoritative, not an unobserved literal). Fixtures `transfer_completed.json` / `transfer_failed.json`
+  re-pinned + docs updated.
+- **A2** — slskd lands files at `staging_root/<leaf-of-remote-folder>/` (no batchId/username subdir).
+  `TransferHandle` now carries a neutral `landing_dir_name`; `enqueue_candidate` derives the leaf via
+  `_remote_folder_leaf` (splits on both `\` and `/`). `core/acquire.py` resolves the staging dir from
+  the handle's leaf AFTER enqueue and points import + purge/quarantine at THAT real folder (firewall
+  stays clean — no wire vocabulary, the `curator-{app}-{id}` label is now a leaf-less fallback only).
+- **A1** — `app/adapters/lidarr.py` (+ `readarr.py`) `execute_import`: `importMode` lowercase `"move"`
+  (Curator's deliberate D-09 choice, not the UI `"copy"`, not the old capital `"Move"`), top-level
+  `replaceExistingFiles:false` + `sendUpdatesToClient:true`, per-file `path/artistId/albumId/
+  albumReleaseId/trackIds/quality (full QualityModel)/indexerFlags/disableReleaseSwitching`, NO per-file
+  `downloadId`. `fixtures/manualimport/expected_post.json` + `get_mapping.json` reconciled (real leaf
+  landing paths).
+
+Full offline suite green (205 passed); firewall grep over `core/acquire.py` clean. No assertions
+weakened — fixtures/constants moved to the live truth, then the tests re-pinned to assert it.

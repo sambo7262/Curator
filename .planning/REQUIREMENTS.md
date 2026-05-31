@@ -129,10 +129,10 @@ Which phases cover which requirements.
 | MATCH-01 | Phase 3 | Complete (03-03 scorer; 03-05 composed end-to-end through gate.evaluate over the labeled corpus) |
 | MATCH-02 | Phase 3 | Complete (03-03 rec-gap recommend; 03-05 composed end-to-end, zero false-accepts over the corpus) |
 | ACQ-01 | Phase 4 | Complete (04-04: collection-window search + gate-once; live A1/A3 pin in 04-05) |
-| ACQ-02 | Phase 4 | Complete (04-04: enqueue + per-item staging + stall watch composed) |
-| ACQ-03 | Phase 4 | Complete (04-04: no-progress stall cancel + next-candidate fallback + exhausted-stuck, fake-clock proven) |
-| IMPORT-01 | Phase 4 | Complete (04-04: deterministic per-item staging under staging_root; hardlink path-identity proven 04-02) |
-| IMPORT-02 | Phase 4 | Complete (04-04: composed the adapter's pre-filtered subset → execute_import; no blind rescan) |
+| ACQ-02 | Phase 4 | Complete (04-04: enqueue + per-item staging + stall watch composed; 04-05: staging resolved to slskd's real landing dir — staging_root/<leaf-of-remote-folder>, A2 live-pinned) |
+| ACQ-03 | Phase 4 | Complete (04-04: no-progress stall cancel + next-candidate fallback + exhausted-stuck, fake-clock proven; 04-05: A3 terminal-state pinned to live `Completed, Succeeded` + robust rule) |
+| IMPORT-01 | Phase 4 | Complete (04-04: deterministic per-item staging; hardlink path-identity proven 04-02; 04-05: import+purge now target slskd's real remote-folder-leaf landing dir, A2 live-pinned — no batchId) |
+| IMPORT-02 | Phase 4 | Complete (04-04: composed the adapter's pre-filtered subset → execute_import; no blind rescan; 04-05: ManualImport envelope pinned live — importMode lowercase `move`, full QualityModel, no per-file downloadId, A1) |
 | IMPORT-03 | Phase 4 | Complete (04-04: verify-by-requery gates the purge; verify-False quarantines) |
 | IMPORT-04 | Phase 4 | Precondition (external Plex auto-scan; Curator does not call Plex — D-04 revised 2026-05-31) |
 | IMPORT-05 | Phase 4 | Complete (04-04: purge-on-success / quarantine-with-reason on every failure branch) |
