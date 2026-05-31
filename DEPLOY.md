@@ -60,7 +60,13 @@ docker run --rm qmcgaw/gluetun genkey
 Copy `.env.example` to `.env` next to the compose file and fill in the blanks:
 - `PIA_USER` / `PIA_PASSWORD` — your PIA OpenVPN credentials
 - `GLUETUN_API_KEY` — the genkey output from Step 2 (same value used by gluetun + slskd)
-- `SLSKD_API_KEY` — any `role=...;cidr=...;<16+ char secret>` value
+- `SLSKD_API_KEY` — the **bare secret key only** (16+ chars, e.g. `openssl rand -hex 32`). It must
+  EXACTLY equal `web.authentication.api_keys.curator.key` in slskd.yml. `role`/`cidr` are SEPARATE
+  slskd.yml fields — NOT part of this value. Curator sends this string verbatim as the `X-API-Key`
+  header (`adapters/slskd.py`), so any `role=…;cidr=…;` prefix here causes a 401. slskd.yml side:
+  `api_keys: { curator: { key: <same hex>, role: readwrite, cidr: 0.0.0.0/0 } }` (use `0.0.0.0/0`
+  or omit cidr — Curator reaches slskd through gluetun's NAT'd published port, so a synobridge CIDR
+  may not match the source IP slskd observes and would 403).
 - `LIDARR_API_KEY` / `READARR_API_KEY` — from each *arr's Settings → General
 - region/CIDR/PUID/PGID/DOCKERHUB_USER/TZ are pre-filled with your values
 ```bash
