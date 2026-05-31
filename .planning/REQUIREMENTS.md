@@ -32,12 +32,12 @@ the music path. Music must work end-to-end before the books adapter is layered i
 
 ### Match Validation
 
-- [ ] **MATCH-01**: Curator scores slskd candidates against the item's authoritative identity (artist/album, track-count completeness, edition/year, format for music; author/title + format/edition for books)
-- [ ] **MATCH-02**: Curator rejects candidates below a configurable confidence threshold (precision over recall) rather than downloading a wrong match
+- [x] **MATCH-01**: Curator scores slskd candidates against the item's authoritative identity (artist/album, track-count completeness, edition/year, format for music; author/title + format/edition for books)
+- [x] **MATCH-02**: Curator rejects candidates below a configurable confidence threshold (precision over recall) rather than downloading a wrong match
 
 ### Quality Enforcement
 
-- [ ] **QUAL-01**: Curator reads the item's `*arr` quality profile and cutoff via the adapter
+- [x] **QUAL-01**: Curator reads the item's `*arr` quality profile and cutoff via the adapter
 - [x] **QUAL-02**: Curator filters slskd candidates by format/bitrate BEFORE downloading and never grabs below cutoff (no downgrades)
 - [x] **QUAL-03**: Curator applies heuristic fake/transcoded-FLAC checks (bitrate/size/source-tag sanity) before accepting a FLAC candidate
 
@@ -123,11 +123,11 @@ Which phases cover which requirements.
 | ARR-02 | Phase 2 | Complete (02-03; 02-04 Readarr-fault-does-not-gate-music proven end-to-end through detect_gaps) |
 | GAP-01 | Phase 2 | Complete (02-03; 02-04 missing detected→persisted end-to-end) |
 | GAP-02 | Phase 2 | Complete (02-03; 02-04 cutoff detected→persisted end-to-end) |
-| QUAL-01 | Phase 3 | Pending |
+| QUAL-01 | Phase 3 | Complete (03-05; adapters return neutral Profile/Manifest, firewall holds over all 8 core modules) |
 | QUAL-02 | Phase 3 | Complete (03-04; no-downgrade gate, both REJECT+PERMIT directions proven) |
 | QUAL-03 | Phase 3 | Complete (03-04; coarse fake-FLAC heuristics, skip-on-missing-data) |
-| MATCH-01 | Phase 3 | Pending |
-| MATCH-02 | Phase 3 | Pending |
+| MATCH-01 | Phase 3 | Complete (03-03 scorer; 03-05 composed end-to-end through gate.evaluate over the labeled corpus) |
+| MATCH-02 | Phase 3 | Complete (03-03 rec-gap recommend; 03-05 composed end-to-end, zero false-accepts over the corpus) |
 | ACQ-01 | Phase 4 | Pending |
 | ACQ-02 | Phase 4 | Pending |
 | ACQ-03 | Phase 4 | Pending |
