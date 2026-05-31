@@ -83,15 +83,42 @@ def run_migrations(conn: sqlite3.Connection) -> None:
     user_version unchanged (STATE-01 self-healing schema reconcile).
     """
     have = conn.execute("PRAGMA user_version;").fetchone()[0]
-    for i, (_, sql) in enumerate(MIGRATIONS, start=1):
-        if i > have:
+    pending = [(i, sql) for i, (_, sql) in enumerate(MIGRATIONS, start=1) if i > have]
+    if not pending:
+        return
+
+    # A migration that rebuilds a table referenced by another table's FK (the standard
+    # RENAME/CREATE/INSERT/DROP "widen the CHECK" used by 0002 and 0003) corrupts the
+    # child FK under SQLite's DEFAULT schema-rewrite: `ALTER TABLE items RENAME TO
+    # items_old` silently repoints staged_files.item_id at items_old, then the trailing
+    # `DROP TABLE items_old` leaves it DANGLING — every later `INSERT INTO staged_files`
+    # dies with "no such table: main.items_old", which breaks the whole Phase-4 import
+    # path post-migration. The documented SQLite table-rebuild procedure is to disable
+    # foreign_keys and enable legacy_alter_table (which suppresses the child-FK rewrite)
+    # AROUND the rebuild. Both pragmas are NO-OPs inside a transaction, so they MUST be
+    # toggled outside the per-migration BEGIN/COMMIT. A foreign_key_check inside each
+    # transaction fails it closed if a rebuild ever leaves a genuine violation.
+    fk_were_on = conn.execute("PRAGMA foreign_keys;").fetchone()[0]
+    conn.execute("PRAGMA foreign_keys=OFF;")
+    conn.execute("PRAGMA legacy_alter_table=ON;")
+    try:
+        for i, sql in pending:
             conn.execute("BEGIN;")
             try:
                 for stmt in _split_statements(sql):
                     conn.execute(stmt)
+                violations = conn.execute("PRAGMA foreign_key_check;").fetchall()
+                if violations:
+                    raise sqlite3.IntegrityError(
+                        f"migration {i} left foreign-key violations: {violations}"
+                    )
                 # The ONLY permitted f-string-into-SQL: `i` is a loop-controlled int, never user input.
                 conn.execute(f"PRAGMA user_version = {i};")
                 conn.execute("COMMIT;")
             except Exception:
                 conn.execute("ROLLBACK;")
                 raise
+    finally:
+        conn.execute("PRAGMA legacy_alter_table=OFF;")
+        if fk_were_on:
+            conn.execute("PRAGMA foreign_keys=ON;")

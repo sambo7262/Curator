@@ -163,10 +163,13 @@ def test_migration_and_version_bump_commit_together(tmp_db_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_migration_0002_bumps_user_version_to_2(tmp_db_path):
-    """A fresh DB migrates all the way to user_version 2 (0001 then 0002 applied in order)."""
+    """A fresh DB migrates all the way to the current head user_version (0001/0002/0003 in order).
+
+    Head is 3 since Phase 5 appended migration_0003; the runner must reach it from a fresh DB.
+    """
     conn = connect(tmp_db_path)
     run_migrations(conn)
-    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
     # staged_files table now exists.
     assert conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='staged_files'"
@@ -212,7 +215,7 @@ def test_existing_rows_survive_the_items_rebuild(tmp_db_path):
     # Now reconnect with the FULL migration list — 0002 rebuilds items beneath the row.
     conn2 = connect(tmp_db_path)
     run_migrations(conn2)
-    assert conn2.execute("PRAGMA user_version;").fetchone()[0] == 2
+    assert conn2.execute("PRAGMA user_version;").fetchone()[0] == 3
     assert conn2.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 1
     row = get_gap(conn2, "lidarr", "77")
     assert row is not None
@@ -236,12 +239,12 @@ def monkeypatch_migrations(conn, db_module, migrations):
 
 
 def test_migration_0002_idempotent(tmp_db_path):
-    """Re-running run_migrations on a v2 DB applies nothing and leaves user_version=2."""
+    """Re-running run_migrations on a current DB applies nothing and leaves user_version at head (3)."""
     conn = connect(tmp_db_path)
     run_migrations(conn)
-    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
     run_migrations(conn)  # second call: no-op
-    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
     conn.close()
 
 
