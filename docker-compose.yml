@@ -68,13 +68,17 @@ services:
     networks: [synobridge]               # plain synobridge member — reaches slskd via gluetun:5030
     depends_on: [gluetun]
     environment:
-      SLSKD_URL: "http://gluetun:5030"     # slskd via gluetun's published port — NEVER http://slskd
+      # *arr + slskd are reached via the NAS LAN IP + published ports: in this homelab the *arr
+      # stack is NOT resolvable by synobridge container name from curator (gluetun's control
+      # server IS, by name — see below). These default to the owner's LAN IP and are overridable
+      # per-deploy via .env (set SLSKD_URL/LIDARR_URL/READARR_URL there if your hosts differ).
+      SLSKD_URL: "${SLSKD_URL:-http://192.168.86.37:5030}"   # gluetun's PUBLISHED slskd port — NEVER http://slskd
       SLSKD_API_KEY: "${SLSKD_API_KEY}"
-      GLUETUN_CONTROL_URL: "http://gluetun:8000"   # health display only (Phase 1: optional)
+      GLUETUN_CONTROL_URL: "http://gluetun:8000"   # reachable by synobridge name; health display only
       GLUETUN_API_KEY: "${GLUETUN_API_KEY}"
-      LIDARR_URL: "http://lidarr:8686"
+      LIDARR_URL: "${LIDARR_URL:-http://192.168.86.37:8686}"
       LIDARR_API_KEY: "${LIDARR_API_KEY}"
-      READARR_URL: "http://readarr:8787"   # books adapter lands in Phase 2/3; wired here for reachability
+      READARR_URL: "${READARR_URL:-http://192.168.86.37:8787}"   # books adapter best-effort (Phase 2/3)
       READARR_API_KEY: "${READARR_API_KEY}"
       DB_PATH: "/db/curator.sqlite"        # SQLite-WAL ledger on its OWN mount (NOT under /data) — Phase 2 (STATE-01)
       TZ: "${TZ}"
