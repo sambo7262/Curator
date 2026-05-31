@@ -1,3 +1,4 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 httpx==0.28.1        # *arr REST client (Servarr v1 paged GET). encode/httpx — human-approved as pinned (Phase 2 package-legitimacy checkpoint, 2026-05-30).
+rapidfuzz==3.13.0    # fuzzy string distance for the matcher (Phase 3). rapidfuzz/RapidFuzz (Max Bachmann), MIT, cp312 manylinux x86_64 wheels — human-approved as pinned (Phase 3 package-legitimacy checkpoint, 2026-05-30).
