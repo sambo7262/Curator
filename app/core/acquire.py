@@ -40,6 +40,33 @@ from state import repo
 
 log = logging.getLogger(__name__)
 
+# REL-02 infra-vs-genuine classifier (RESEARCH Pattern 5 / open question A1) — defined ONCE here and
+# imported by core/reconcile.py + core/scheduler.py (Waves 1/2) so the boundary lives in one place.
+# An INFRA-class fault (the connection/timeout family below) means "the world is unreachable" — the
+# caller must NOT burn a per-item attempt on it (a VPN flap must never push an available album toward
+# permanently-unavailable). A genuine "not found" (an adapter returning None, or a non-infra error)
+# is distinct and DOES map to stuck/burns an attempt.
+#
+# acquire.py deliberately does NOT import httpx at module top (it must parse in the offline Python 3.9
+# sandbox where httpx may be absent — see build_acquire_clients' lazy import). So INFRA_EXC is built
+# behind a guarded import: when httpx is present it is the real tuple of exception types; when absent
+# it is the empty tuple (nothing is classified as infra, so _safe_call keeps its pre-Phase-5 behavior
+# of mapping every fault to None — safe for the sandbox, and the real classification runs on 3.12).
+# httpx exception TYPES are neutral library types (not *arr/slskd wire vocabulary), so the firewall
+# over core holds. Downstream modules import THIS single definition — they must not redefine it.
+try:
+    import httpx as _httpx
+
+    INFRA_EXC = (
+        _httpx.ConnectError,
+        _httpx.ConnectTimeout,
+        _httpx.ReadTimeout,
+        _httpx.PoolTimeout,
+        _httpx.RemoteProtocolError,
+    )
+except ImportError:  # offline 3.9 sandbox without httpx — nothing is classifiable as infra here
+    INFRA_EXC = ()
+
 
 @dataclass(frozen=True)
 class TransferProgress:
@@ -313,13 +340,28 @@ def acquire_item(
 
 
 def _safe_call(fn: Callable, arg) -> Any:
-    """Call an adapter decision-input fetch, mapping a not-found (None return OR raise) to None so the
-    caller can mark the gap stuck. The primary (Lidarr) adapter raises on a hard fault; a raise here
-    means we can't gate the gap, which is correctly surfaced as stuck (not a crash)."""
+    """Call an adapter decision-input fetch, distinguishing an INFRA outage from a genuine not-found
+    (REL-02, A1). The infra-vs-genuine boundary:
+
+      * An INFRA-class fault (INFRA_EXC — connection/timeout family) RE-RAISES so the caller can
+        classify it as infra and burn NO per-item attempt (the world is unreachable, not "this gap
+        genuinely failed" — a VPN flap must never push an available album toward stuck/permanently-
+        unavailable).
+      * A genuine not-found — the adapter returning None, OR any NON-infra exception (e.g. a parse /
+        value error standing in for a 404-style absence) — maps to None so the caller marks the gap
+        stuck. This preserves the pre-Phase-5 behavior for the genuine path (test_acquire stays green).
+
+    The primary (Lidarr) adapter raises on a hard fault; only the connection/timeout subset of those
+    is infra. INFRA_EXC is () in the offline sandbox without httpx, so there it degrades to the old
+    everything-to-None behavior (safe; the real classification runs on 3.12)."""
     try:
         return fn(arg)
+    except INFRA_EXC:
+        # The world is unreachable — re-raise so the caller treats it as infra (no burned attempt).
+        log.info("decision-input fetch hit an infra fault -> re-raising for infra classification")
+        raise
     except Exception as e:
-        log.info("decision-input fetch failed (%s) -> treat as unavailable", e)
+        log.info("decision-input fetch failed (%s) -> treat as genuinely unavailable", e)
         return None
 
 
