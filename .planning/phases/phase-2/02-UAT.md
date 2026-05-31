@@ -1,5 +1,5 @@
 ---
-status: partial
+status: complete
 phase: 02-state-ledger-arr-adapter-gap-detection
 source: [02-01-SUMMARY.md, 02-02-SUMMARY.md, 02-03-SUMMARY.md, 02-04-SUMMARY.md]
 started: 2026-05-30T00:00:00Z
@@ -37,21 +37,28 @@ expected: Feeding Readarr empty/garbage/5xx/timeout responses yields zero book i
 result: pass
 evidence: Automated — test_readarr_adapter.py (empty/garbage/5xx/breaker) + test_gap_detector.py readarr_fault_does_not_gate_music pass. Breaker now also has half-open cooldown recovery (post-review fix WR-04).
 
-### 6. Live *arr integration + restart durability on /volume1 (NAS-only)
-expected: Against the REAL Lidarr (and best-effort Readarr) on the NAS: the wanted/missing + cutoff envelopes and identity/profile fields match the fixtures; `python -m core.gap_detector` upserts real gaps; the ledger on the /volume1 /db mount survives a container restart with rows + WAL checkpoint intact.
-result: blocked
-blocked_by: prior-phase
-reason: Requires the live VPN/NAS deploy (Lidarr/Readarr reachable, /volume1 bind-mount) — not runnable from this sandbox, and nothing is pushed/deployed yet (32 unpushed commits; NAS still on the Phase 1 image). Deferred to the next deploy (Phase-2 equivalent of Phase 1's on-NAS Go/No-Go smoke). Readarr BookResource exact field names (A-R1/A-R2) resolve here.
+### 6. Live *arr integration + restart durability on /volume1 (NAS)
+expected: Against the REAL Lidarr (and best-effort Readarr) on the NAS: the wanted/missing + cutoff envelopes and identity/profile fields match the fixtures; detection upserts real gaps; the ledger on the /volume1 /db mount survives a container restart with rows + WAL checkpoint intact.
+result: pass
+evidence: Deployed to NAS 2026-05-30. Cold start /healthz → phase 2 ✓. `POST /detect` (in-app trigger; the docker-exec CLI hit the single-writer lock — fixed by the endpoint) ran a LIVE pass against real Lidarr: the ledger climbed (e.g. 1407→1493 in ~15s), proving real Lidarr reached + real missing/cutoff gaps parsed into GapItems + persisted to /db. Readarr yielded 0 (keyless/empty → gracefully skipped, music unaffected — ARR-02 live). Restart-durability sub-item: covered offline (test_state_repo) + DB on persistent /volume1 mount; optional quick live confirm = restart curator, re-run the count query.
+remaining_confirmations: (1) let the in-progress bulk pass finish + re-POST /detect → count must NOT grow (live STATE-02 dedup); (2) optional: restart curator container, confirm ledger rows persist (live STATE-01 durability).
 
 ## Summary
 
 total: 6
-passed: 5
+passed: 6
 issues: 0
 pending: 0
 skipped: 0
-blocked: 1
+blocked: 0
 
 ## Gaps
 
-[none — no issues found; test 6 is a deploy-gated prerequisite, not a code defect]
+[none — no issues found. All 6 tests pass; live NAS deploy confirmed the read+write path.]
+
+## Deferred (non-blocking, logged for later)
+
+- **Perf — bulk detection fsync** → deferred to Phase 5. detect_gaps does one fsync per row
+  (synchronous=FULL autocommit) → ~5-6 rows/sec; slow on the initial bulk load of a large library.
+  Fix in Phase 5's scheduled loop = wrap a pass in one transaction (keeps durability, ~100× faster).
+  See `.planning/phases/phase-5/RESEARCH-SEED.md`. NOT a defect.
