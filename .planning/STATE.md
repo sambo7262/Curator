@@ -16,6 +16,7 @@ Phase 1 delivers the substrate: gluetun (PIA/OpenVPN, kill-switch, port forwardi
 
 ## Recent Decisions
 
+- **Phase 4 precondition: slskd sharing must be live BEFORE first real download (2026-05-30, owner-raised)** — Phase 4 does Curator's first slskd downloads, but SHARE automation is Phase 5. A zero-share Soulseek account gets leech-blocked. Resolution: do NOT reorder; configure slskd-level shares MANUALLY (point slskd at read-only `/data/media/music` + `/data/media/books`, container-internal paths, verify shared-file count > 0) before any Phase 4 live test. SHARE-01/02 (Curator auto-ensuring shares) stays in Phase 5. Full error-free setup procedure in `.planning/phases/phase-4/RESEARCH-SEED.md`. Phase 3 (matching/gating) is unaffected — never touches slskd.
 - **PIA region = CA Vancouver** — west-coast PF-capable (US has zero port forwarding; latency was the owner's concern but PF is mandatory for slskd).
 - **Inline execution** of Phase 1 (not worktree subagents) — all owner-provided values were in context and 01-02/01-04 share docker-compose.yml; faster and conflict-free.
 - **Owner deploys manually** in Container Manager (not auto-SSH) — DEPLOY.md is the handoff.
