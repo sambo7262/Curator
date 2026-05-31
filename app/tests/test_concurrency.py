@@ -44,9 +44,9 @@ def _conn():
 def _seed(conn, n):
     for i in range(n):
         conn.execute(
-            """INSERT INTO items (arr_app, arr_id, kind, artist_or_author, title, foreign_id,
-                                  quality_profile_id, status, discovered_at, updated_at, attempt_count)
-               VALUES ('lidarr', ?, 'album', 'A', 'T', ?, 1, 'pending',
+            """INSERT INTO items (arr_app, arr_id, kind, gap_type, artist_or_author, title, foreign_id,
+                                  quality_profile_id, status, discovered_at, last_seen_at, attempt_count)
+               VALUES ('lidarr', ?, 'album', 'missing', 'A', 'T', ?, 1, 'pending',
                        '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z', 0)""",
             (str(i), f"fid-{i}"),
         )
@@ -81,8 +81,8 @@ def test_dispatch_respects_max_concurrent(monkeypatch):
 
     adapter = FakeAdapter()
     items = [
-        GapItem(arr_app="lidarr", arr_id=str(i), kind="album", artist_or_author="A",
-                title="T", foreign_id="fid", quality_profile_id=1)
+        GapItem(arr_app="lidarr", arr_id=str(i), kind="album", gap_type="missing",
+                artist_or_author="A", title="T", foreign_id="fid", quality_profile_id=1)
         for i in range(n_items)
     ]
     outcomes = scheduler.dispatch(items, {"lidarr": adapter}, object(), conn, lock, settings)
@@ -105,8 +105,8 @@ def test_bounded_writes_no_database_locked(monkeypatch):
     settings = _settings(max_concurrent)
     adapter = FakeAdapter()
     items = [
-        GapItem(arr_app="lidarr", arr_id=str(i), kind="album", artist_or_author="A",
-                title="T", foreign_id="fid", quality_profile_id=1)
+        GapItem(arr_app="lidarr", arr_id=str(i), kind="album", gap_type="missing",
+                artist_or_author="A", title="T", foreign_id="fid", quality_profile_id=1)
         for i in range(n_items)
     ]
 

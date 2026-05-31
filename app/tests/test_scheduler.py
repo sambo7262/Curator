@@ -67,17 +67,17 @@ def _conn():
 def _seed_item(conn, arr_id, status="pending", attempt_count=0, discovered_at="2020-01-01T00:00:00Z",
                next_attempt_at=None, app="lidarr"):
     conn.execute(
-        """INSERT INTO items (arr_app, arr_id, kind, artist_or_author, title, foreign_id,
-                              quality_profile_id, status, discovered_at, updated_at,
+        """INSERT INTO items (arr_app, arr_id, kind, gap_type, artist_or_author, title, foreign_id,
+                              quality_profile_id, status, discovered_at, last_seen_at,
                               attempt_count, next_attempt_at)
-           VALUES (?, ?, 'album', 'Artist', 'Title', ?, 1, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, 'album', 'missing', 'Artist', 'Title', ?, 1, ?, ?, ?, ?, ?)""",
         (app, str(arr_id), f"fid-{arr_id}", status, discovered_at, discovered_at,
          attempt_count, next_attempt_at),
     )
 
 
 def _item(app="lidarr", arr_id="1"):
-    return GapItem(arr_app=app, arr_id=str(arr_id), kind="album",
+    return GapItem(arr_app=app, arr_id=str(arr_id), kind="album", gap_type="missing",
                    artist_or_author="Artist", title="Title", foreign_id="fid", quality_profile_id=1)
 
 
