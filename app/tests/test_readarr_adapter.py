@@ -214,3 +214,103 @@ def test_readarr_now_exposes_profile_and_manifest_methods(httpx_client):
     adapter = _adapter(httpx_client({}))
     assert callable(adapter.get_quality_profile)
     assert callable(adapter.get_manifest)
+
+
+# === Phase 4: best-effort import methods — swallow->safe default, books never gate music (ARR-02) ===
+# Readarr mirrors Lidarr's import shapes (manual_import_candidates / execute_import / verify_imported)
+# but wraps each body in the readarr swallow block so ANY fault degrades to a safe default
+# (Pitfall 5): [] for candidates, None for execute, False for verify. A false-negative verify is the
+# SAFE choice — it forces quarantine; a false-positive would skip cleanup. The book-identity wire
+# fields stay adapter-local (A5).
+
+from adapters.base import GapItem
+
+
+def _book_item(arr_id="401", foreign_id="fb1"):
+    return GapItem(
+        arr_app="readarr", arr_id=arr_id, kind="book", gap_type="missing",
+        title="Dune", artist_or_author="Frank Herbert", foreign_id=foreign_id,
+        quality_profile_id=1, raw={"id": int(arr_id), "foreignBookId": foreign_id},
+    )
+
+
+def test_manual_import_candidates_returns_importable_subset_on_success():
+    """On success, readarr.manual_import_candidates returns ONLY the importable subset (adapter-filtered,
+    mirroring Lidarr): empty rejections + a non-empty resolved track/edition list. A rejected resource
+    is excluded — the book-side importability decision is also made in-adapter (core stays key-blind)."""
+    mapping = [
+        {"id": 1, "path": "/data/x/dune.epub", "book": {"id": 9}, "editionId": 90,
+         "tracks": [{"id": 700}], "quality": {"quality": {"id": 4, "name": "EPUB"}},
+         "rejections": [], "downloadId": "curator-readarr-1"},
+        {"id": 2, "path": "/data/x/cover.jpg", "book": None, "editionId": 0,
+         "tracks": [], "quality": {"quality": {"id": 0, "name": "Unknown"}},
+         "rejections": [{"reason": "Unknown Quality", "type": "permanent"}],
+         "downloadId": "curator-readarr-1"},
+    ]
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/v1/manualimport"):
+            return httpx.Response(200, json=mapping)
+        return httpx.Response(404, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    candidates = _adapter(client).manual_import_candidates("/data/x", download_id="curator-readarr-1")
+    assert [c["id"] for c in candidates] == [1]   # only the importable resource survives
+
+
+def test_manual_import_candidates_swallows_fault_to_empty():
+    """ARR-02: a 5xx/timeout on the candidates GET returns [] (never raises into the loop)."""
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "readarr down"})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    assert _adapter(client).manual_import_candidates("/data/x", download_id="x") == []
+
+
+def test_execute_import_swallows_fault_to_none(caplog):
+    """ARR-02: execute_import on a fault returns None and does not raise (a book outage can't gate
+    music). The fault is logged at warning."""
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "down"})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    with caplog.at_level(logging.WARNING):
+        result = _adapter(client).execute_import([{"path": "/p", "book": {"id": 1}, "editionId": 2,
+                                                   "tracks": [{"id": 3}], "quality": {},
+                                                   "downloadId": "x"}])
+    assert result is None
+    assert any("readarr" in r.message.lower() for r in caplog.records)
+
+
+def test_verify_imported_false_on_fault_is_safe():
+    """Pitfall 5: verify_imported returns False on any fault — a false-negative forces quarantine
+    (safe); a false-positive would skip cleanup. Never True on a fault, never raises."""
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "down"})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    assert _adapter(client).verify_imported(_book_item()) is False
+
+
+def test_verify_imported_true_when_book_left_wanted_list():
+    """On success, verify_imported returns True when the book id is absent from the wanted list."""
+    def _handler(request: httpx.Request) -> httpx.Response:
+        # wanted re-query returns OTHER books only (book 401 imported -> gone)
+        if request.url.path.endswith("/api/v1/wanted/missing"):
+            return httpx.Response(200, json={
+                "page": 1, "pageSize": 100, "totalRecords": 1,
+                "records": [{"id": 999, "title": "Other", "foreignBookId": "fb999",
+                             "qualityProfileId": 1, "author": {"authorName": "Z"}}],
+            })
+        return httpx.Response(200, json={"page": 1, "pageSize": 100, "totalRecords": 0, "records": []})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    assert _adapter(client).verify_imported(_book_item(arr_id="401")) is True
+
+
+def test_readarr_exposes_import_methods(httpx_client):
+    """Protocol conformance: the three Phase-4 import methods are callable on the Readarr adapter."""
+    adapter = _adapter(httpx_client({}))
+    assert callable(adapter.manual_import_candidates)
+    assert callable(adapter.execute_import)
+    assert callable(adapter.verify_imported)
