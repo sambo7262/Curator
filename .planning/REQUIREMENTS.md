@@ -49,17 +49,17 @@ the music path. Music must work end-to-end before the books adapter is layered i
 
 ### Acquisition
 
-- [ ] **ACQ-01**: Curator triggers slskd searches via REST API for eligible gaps
-- [ ] **ACQ-02**: Curator initiates the chosen candidate's download via slskd into an isolated per-item staging/quarantine dir and watches it to completion
-- [ ] **ACQ-03**: Curator handles partial/failed/stalled downloads (timeout, cancel, mark, back off) and never holds a slot forever
+- [x] **ACQ-01**: Curator triggers slskd searches via REST API for eligible gaps
+- [x] **ACQ-02**: Curator initiates the chosen candidate's download via slskd into an isolated per-item staging/quarantine dir and watches it to completion
+- [x] **ACQ-03**: Curator handles partial/failed/stalled downloads (timeout, cancel, mark, back off) and never holds a slot forever
 
 ### Import & Cleanup
 
-- [ ] **IMPORT-01**: Completed downloads land in an isolated per-item staging/quarantine dir on the shared `/data` tree, at a path addressed identically by slskd, Curator, and the `*arr` (hardlink-capable, no cross-FS copy)
-- [ ] **IMPORT-02**: Curator imports ONLY the wanted files via the `*arr` Manual Import / command API (never a blind drop-folder rescan), telling the `*arr` exactly which release/files to take
-- [ ] **IMPORT-03**: Curator verifies the item actually imported into the `/volume1` library (re-queries the `*arr`; "downloaded" never counts as "imported")
+- [x] **IMPORT-01**: Completed downloads land in an isolated per-item staging/quarantine dir on the shared `/data` tree, at a path addressed identically by slskd, Curator, and the `*arr` (hardlink-capable, no cross-FS copy)
+- [x] **IMPORT-02**: Curator imports ONLY the wanted files via the `*arr` Manual Import / command API (never a blind drop-folder rescan), telling the `*arr` exactly which release/files to take
+- [x] **IMPORT-03**: Curator verifies the item actually imported into the `/volume1` library (re-queries the `*arr`; "downloaded" never counts as "imported")
 - [ ] **IMPORT-04**: New media is reflected in Plex — satisfied by the owner's existing Plex "scan on new media" (inotify) auto-scan, an external precondition (Phase-4 decision D-04, 2026-05-31). Curator does NOT call Plex (redundant with auto-scan; avoids a Plex secret in the stack). Revisit with an env-gated trigger only if imports are observed not appearing promptly.
-- [ ] **IMPORT-05**: After a verified import (or terminal failure) Curator AUTO-PURGES the per-item staging/quarantine dir, so leftover/unwanted files never reach `/volume1` and never need manual deletion; unresolved import failures are reconciled or surfaced, never silently dropped
+- [x] **IMPORT-05**: After a verified import (or terminal failure) Curator AUTO-PURGES the per-item staging/quarantine dir, so leftover/unwanted files never reach `/volume1` and never need manual deletion; unresolved import failures are reconciled or surfaced, never silently dropped
 
 ### Automated Sharing
 
@@ -128,14 +128,14 @@ Which phases cover which requirements.
 | QUAL-03 | Phase 3 | Complete (03-04; coarse fake-FLAC heuristics, skip-on-missing-data) |
 | MATCH-01 | Phase 3 | Complete (03-03 scorer; 03-05 composed end-to-end through gate.evaluate over the labeled corpus) |
 | MATCH-02 | Phase 3 | Complete (03-03 rec-gap recommend; 03-05 composed end-to-end, zero false-accepts over the corpus) |
-| ACQ-01 | Phase 4 | Pending |
-| ACQ-02 | Phase 4 | Pending |
-| ACQ-03 | Phase 4 | Pending |
-| IMPORT-01 | Phase 4 | Pending |
-| IMPORT-02 | Phase 4 | In progress (04-03: adapter ManualImport-Move surface landed; loop composes 04-04) |
-| IMPORT-03 | Phase 4 | In progress (04-03: verify-by-requery surface landed; loop composes 04-04) |
+| ACQ-01 | Phase 4 | Complete (04-04: collection-window search + gate-once; live A1/A3 pin in 04-05) |
+| ACQ-02 | Phase 4 | Complete (04-04: enqueue + per-item staging + stall watch composed) |
+| ACQ-03 | Phase 4 | Complete (04-04: no-progress stall cancel + next-candidate fallback + exhausted-stuck, fake-clock proven) |
+| IMPORT-01 | Phase 4 | Complete (04-04: deterministic per-item staging under staging_root; hardlink path-identity proven 04-02) |
+| IMPORT-02 | Phase 4 | Complete (04-04: composed the adapter's pre-filtered subset → execute_import; no blind rescan) |
+| IMPORT-03 | Phase 4 | Complete (04-04: verify-by-requery gates the purge; verify-False quarantines) |
 | IMPORT-04 | Phase 4 | Precondition (external Plex auto-scan; Curator does not call Plex — D-04 revised 2026-05-31) |
-| IMPORT-05 | Phase 4 | Pending |
+| IMPORT-05 | Phase 4 | Complete (04-04: purge-on-success / quarantine-with-reason on every failure branch) |
 | GAP-03 | Phase 5 | Pending |
 | STATE-03 | Phase 5 | Pending |
 | SHARE-01 | Phase 5 | Pending |
