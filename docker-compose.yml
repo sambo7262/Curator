@@ -1,11 +1,18 @@
 # Curator Phase-1 stack — gluetun (PIA/OpenVPN) + slskd (shared netns) + curator (synobridge).
-# Deploy on the Synology via Container Manager. Pin @sha256 digests before prod (see NAS-RECON.md).
+# Deploy on the Synology via Container Manager.
+# Update strategy: Docker auto-selects the amd64 image from each multi-arch manifest (J4125 = x86_64),
+# so no @sha256/platform pin is needed for the chipset. Watchtower auto-updates slskd + curator
+# (mutable `latest` tag + enable label). gluetun is deliberately version-pinned and EXCLUDED from
+# Watchtower — it's privacy-critical and has breaking config changes between versions (e.g. the
+# v3.40+ control-server-auth requirement below); bump it by hand after reading the changelog.
 # Owner environment: synobridge=172.20.0.0/16, PUID/PGID=1031/65536, /volume1/data, PIA=CA Vancouver.
 services:
   # ─────────────────────────────── VPN tunnel (PIA via OpenVPN) ───────────────────────────────
   gluetun:
-    image: qmcgaw/gluetun:v3.41.1@sha256:2f33c71e5e164fcd51a962cb950134df25155593edf0c3e1201f888d027049b4  # amd64 digest pinned 2026-05-30
+    image: qmcgaw/gluetun:v3.41.1  # version-pinned on purpose; Docker auto-selects amd64. Bump by hand — see Watchtower note below.
     container_name: gluetun
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"  # privacy-critical VPN: never auto-update; breaking config changes between versions
     cap_add: [NET_ADMIN]
     devices:
       - /dev/net/tun:/dev/net/tun
@@ -35,8 +42,10 @@ services:
 
   # ─────────────────────────────── Soulseek daemon ───────────────────────────────
   slskd:
-    image: slskd/slskd:0.25.1@sha256:4fe0c6f628efaa9218bf2fa5cc779cac4fe261e74ff617514587af1dc36c8d54  # amd64 digest pinned 2026-05-30 (>=0.24.4 needed for native PF)
+    image: slskd/slskd:latest  # rolling tag so Watchtower auto-updates; Docker auto-selects amd64 (needs >=0.24.4 for native PF — latest satisfies this)
     container_name: slskd
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"   # auto-update: lower-risk app, rides latest
     network_mode: "service:gluetun"      # share VPN netns — NO ports/networks here (they live on gluetun)
     user: "${PUID}:${PGID}"              # slskd uses the `user:` directive, NOT PUID/PGID env vars
     depends_on:
@@ -62,8 +71,10 @@ services:
 
   # ─────────────────────────────── Curator app stub ───────────────────────────────
   curator:
-    image: ${DOCKERHUB_USER}/curator:latest   # built by CI (INFRA-05); pin a sha tag for reproducible prod
+    image: ${DOCKERHUB_USER}/curator:latest   # built by CI (INFRA-05); rolling tag, Watchtower auto-updates
     container_name: curator
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"   # auto-update on every CI push to :latest
     user: "${PUID}:${PGID}"              # non-root: reads /app (world-readable), writes only to 1031-owned /db (T-02-05; mirrors slskd)
     networks: [synobridge]               # plain synobridge member — reaches slskd via gluetun:5030
     depends_on: [gluetun]
