@@ -64,6 +64,7 @@ services:
   curator:
     image: ${DOCKERHUB_USER}/curator:latest   # built by CI (INFRA-05); pin a sha tag for reproducible prod
     container_name: curator
+    user: "${PUID}:${PGID}"              # non-root: reads /app (world-readable), writes only to 1031-owned /db (T-02-05; mirrors slskd)
     networks: [synobridge]               # plain synobridge member — reaches slskd via gluetun:5030
     depends_on: [gluetun]
     environment:
