@@ -73,11 +73,12 @@ Laid the Phase-5 persistence + config substrate: migration_0003 adds the backoff
 
 ## Deviations from Plan
 
-This plan's implementation was discovered **already written but uncommitted** in the working tree from a prior interrupted execution (a stray `.p5_test_result.txt` artifact recorded `2 failed, 247 passed`). This run treated the tree as the deliverable: verified every acceptance criterion and `must_haves` truth against it, then committed the four tasks atomically per the plan's task boundaries. The code matches the plan's `<action>` specs exactly (explicit-column INSERT, two-branch predicate, capped backoff, 7 tunables) — no functional changes were needed.
+This plan's implementation (and, as it turned out, a large slice of later Phase-5 waves) was discovered **already written but uncommitted** in the working tree from a prior interrupted execution. This run treated the 05-01-scoped slice as the deliverable: verified every acceptance criterion and `must_haves` truth against it, then committed the four 05-01 tasks atomically per the plan's task boundaries (the parallel 05-02 Wave-0 work was committed by its own agent — commits `1b489ab`..`b260094`). The 05-01 code matches the plan's `<action>` specs exactly (explicit-column INSERT, two-branch predicate, capped backoff, 7 tunables) — no functional changes were needed. The leftover untracked future-wave files (scheduler/reconcile/shares + their tests + a stray `main.py.orig`) were left in place for plans 05-03/04/05 to own; see Deferred Issues for the `test_scheduler.py` leak they cause in the full suite.
 
 Housekeeping (not behavioral deviations):
 - Removed the stray `.p5_test_result.txt` artifact left by the prior run.
 - Restored `.planning/phases/phase-5/05-VALIDATION.md`, which showed as modified with a **zero-content** diff (mtime touch only).
+- Left the untracked future-wave files (`app/core/scheduler.py`, `reconcile.py`, `shares.py`, `app/tests/test_{scheduler,concurrency,reconcile,status_page}.py`, `app/main.py.orig`) untouched — out of 05-01 scope.
 
 No Rule 1/2/3 auto-fixes were required — the implementation was already correct and firewall-clean.
 
@@ -94,7 +95,16 @@ Two **pre-existing** Phase-4 slskd-fixture test failures surfaced in the full su
 
 No new security-relevant surface beyond the plan's threat_model. T-05-01 (row preservation) is proven by the count-unchanged migration test; T-05-02 (`?`-bound eligibility/attempt SQL) holds — no f-string into SQL in any new DAO. No new packages (T-05-SC — Phase 5 installs zero).
 
+## Task Commits
+
+1. **Task 1 — Wave-0 test scaffolds + conftest fixtures** — `fd4c53b` (test)
+2. **Task 2 — migration_0003 + db.py registration** — `b20874b` (feat)
+3. **Task 3 — repo eligibility/backoff/attempt/counts DAOs + repo tests** — `4a7b334` (feat)
+4. **Task 4 — Phase-5 config tunables** — `2ac7d32` (feat)
+
+**Plan metadata:** `cf70831` (docs: complete plan — SUMMARY + STATE + ROADMAP + deferred-items)
+
 ## Self-Check: PASSED
 
 - Created files exist: `app/state/migration_0003.sql`, `app/tests/test_migration_0003.py`, `app/tests/test_eligibility.py`, `app/tests/test_backoff.py`, `.planning/phases/phase-5/05-01-SUMMARY.md` — all FOUND.
-- Task commits exist: `84d9bb2` (test scaffolds), `a1d6f4d` (migration_0003 + db.py), `9f8e2a1` (repo DAOs), `7b3c9d4` (config) — all present in `git log`.
+- Task commits exist: `fd4c53b` (test scaffolds), `b20874b` (migration_0003 + db.py), `4a7b334` (repo DAOs), `2ac7d32` (config) — all present in `git log`.
