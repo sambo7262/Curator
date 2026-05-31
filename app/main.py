@@ -24,21 +24,62 @@ _detect_lock = threading.Lock()
 
 @app.on_event("startup")
 def _startup() -> None:
-    """Reconcile the SQLite schema on boot so a recreated container is self-healing (STATE-01, criterion 1).
+    """Boot the ledger, reconcile crash orphans, then start the Phase-5 acquisition daemon (REL-01/02).
 
-    Open ONE connection, migrate on it, and RETAIN it on app.state — this is the single
-    long-lived writer connection the WAL single-writer design calls for (BL-02). Later request
-    handlers reuse app.state.db rather than opening their own, and it is closed on shutdown so
-    the WAL is checkpointed deterministically rather than left to GC.
+    Open ONE connection, migrate on it (run_migrations now applies migration_0003 — the backoff/
+    attempt columns + the 'permanently-unavailable' status), and RETAIN it on app.state as the single
+    long-lived WAL writer connection (BL-02). Then:
+
+      1. Seed app.state.shares_ok = True (the /status surface reads it; ensure_shares maintains it).
+      2. reconcile_on_startup (D-14/REL-02): reset orphaned searching/downloading/importing rows from
+         a prior crash, with a verify-by-requery guard so an item that imported during downtime is NOT
+         re-imported. Uses the SHARED _detect_lock so its writes never collide with /detect.
+      3. Start the scheduler daemon (REL-01): a stdlib daemon thread runs a boot cycle then loops on
+         the poll interval. It is handed the SAME _detect_lock so a manual /detect and a cycle can
+         never write the single connection concurrently (D-16).
+
+    Imports are lazy (inside the handler, the established main.py pattern) so the module parses in the
+    offline 3.9 sandbox and tests can monkeypatch build_adapters / Scheduler / reconcile_on_startup.
     """
+    from core.gap_detector import build_adapters
+    from core.reconcile import reconcile_on_startup
+    from core.scheduler import Scheduler
+
     conn = connect(settings.db_path)
     run_migrations(conn)
     app.state.db = conn
+    app.state.shares_ok = True
+
+    # D-14/REL-02: reset crash orphans cleanly (verify-by-requery guard, no double-import, no burn).
+    # Defensive: a boot-time infra/config fault while BUILDING the adapters (e.g. *arr unreachable or
+    # a transiently-missing key) must NOT crash app startup — the app comes up and the scheduler will
+    # reconcile/retry on a later cycle. reconcile_on_startup already swallows per-row infra faults; we
+    # additionally guard the build_adapters() call itself so the app is always self-healing on boot.
+    try:
+        reconcile_on_startup(conn, _detect_lock, build_adapters, settings)
+    except Exception:  # noqa: BLE001 — boot reconcile must never block the app coming up (REL-01/02)
+        import logging
+        logging.getLogger(__name__).exception(
+            "startup reconcile failed (continuing; the scheduler will retry)"
+        )
+
+    # REL-01: start the daemon, sharing the single writer lock with /detect (D-16). The daemon's own
+    # cycle is fully guarded (a cycle exception is logged and the loop continues — Pitfall 5).
+    app.state.scheduler = Scheduler(app, settings, _detect_lock)
+    app.state.scheduler.start()
 
 
 @app.on_event("shutdown")
 def _shutdown() -> None:
-    """Close the retained writer connection so the WAL checkpoints cleanly (BL-02)."""
+    """Stop the scheduler daemon, THEN close the retained writer connection (clean WAL checkpoint).
+
+    Order matters: the daemon must stop (its in-flight cycle drains / the loop joins) BEFORE the
+    connection closes, so a worker never touches a closed connection on the way down (BL-02 + REL-01).
+    """
+    sched = getattr(app.state, "scheduler", None)
+    if sched is not None:
+        sched.stop()
+        app.state.scheduler = None
     conn = getattr(app.state, "db", None)
     if conn is not None:
         conn.close()

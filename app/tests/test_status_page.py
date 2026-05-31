@@ -148,3 +148,56 @@ def test_render_status_html_pure_function_on_handbuilt_snapshot():
     )
     assert "<b>z</b>" not in evil
     assert "&lt;b&gt;z&lt;/b&gt;" in evil
+
+
+# ---------------------------------------------------------------------------
+# Task 2 (05-05): a DISTINCT lifecycle test — startup wires the scheduler + shares_ok and reconcile,
+# shutdown stops the scheduler cleanly, WITHOUT a live acquisition cycle firing.
+# ---------------------------------------------------------------------------
+
+
+class _FakeAdapter:
+    """Offline ArrAdapter: no get_wanted rows, no orphans to verify — reconcile is a clean no-op."""
+
+    app = "lidarr"
+
+    def get_wanted(self):
+        return []
+
+    def verify_imported(self, item):  # pragma: no cover - no orphans seeded
+        return False
+
+
+def test_scheduler_lifecycle(tmp_path, monkeypatch):
+    """REL-01/REL-02 wiring: TestClient startup builds app.state.scheduler + app.state.shares_ok and
+    runs reconcile_on_startup without raising; shutdown stops the scheduler cleanly. The ACQ_ENABLED
+    kill-switch is OFF for the test so the daemon's boot cycle short-circuits — this proves the WIRING,
+    not a live acquisition (no slskd/*arr is touched). build_adapters is monkeypatched to an offline
+    fake so neither reconcile nor any cycle reaches the network."""
+    monkeypatch.setattr(
+        main, "settings", Settings(db_path=str(tmp_path / "lifecycle.sqlite")), raising=True
+    )
+    # Kill-switch OFF: the scheduler's boot cycle re-reads Settings.from_env() and skips the cycle,
+    # so no live acquisition fires during the test. A long poll interval is a belt-and-braces guard.
+    monkeypatch.setenv("ACQ_ENABLED", "false")
+    monkeypatch.setenv("ACQ_POLL_INTERVAL_SECONDS", "3600")
+    # Offline adapters for reconcile_on_startup (no rows -> clean no-op) and any detect path.
+    monkeypatch.setattr(
+        "core.gap_detector.build_adapters",
+        lambda: ([_FakeAdapter()], []),
+        raising=True,
+    )
+
+    with TestClient(main.app) as c:
+        c.get("/healthz")
+        # startup wired the daemon + the shares flag.
+        assert main.app.state.scheduler is not None
+        assert main.app.state.scheduler._thread.is_alive()
+        assert main.app.state.shares_ok is True
+        # the existing endpoints still answer.
+        assert c.get("/readyz").status_code == 200
+        assert c.get("/status.json").status_code == 200
+
+    # after shutdown the scheduler stopped cleanly and the connection closed.
+    assert main.app.state.scheduler is None
+    assert main.app.state.db is None
