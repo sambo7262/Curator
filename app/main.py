@@ -1,6 +1,7 @@
 # Curator — Phase 1 health/status stub.
 # Proves the image builds, pulls from Docker Hub, runs on synobridge, and can read /data.
 # All application logic (gap detection, matching, slskd, import) arrives in Phases 2-6.
+import logging
 import os
 import threading
 from datetime import datetime, timedelta, timezone
@@ -11,6 +12,15 @@ from fastapi.responses import HTMLResponse
 
 from config import settings
 from state.db import connect, run_migrations
+
+# Make the app's own loggers (core.scheduler etc.) actually emit. uvicorn configures only its own
+# loggers, leaving the root at WARNING — so the scheduler's INFO cycle lines (detect/eligible/DRY-RUN)
+# were silently dropped while only ERROR-level crashes showed. Honor LOG_LEVEL (default INFO).
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    force=True,
+)
 
 app = FastAPI(title="Curator", version="0.2.0-phase2")
 DATA = Path("/data")
