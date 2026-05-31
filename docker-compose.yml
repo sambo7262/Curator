@@ -98,7 +98,7 @@ services:
     volumes:
       - /volume1/docker/curator/config:/config
       - /volume1/docker/curator/db:/db     # SQLite ledger — its OWN writable local mount; WAL is unsafe on /data or network shares (STATE-01)
-      - /volume1/data:/data:ro             # Phase-1 stub only proves it can READ /data (read-only)
+      - /volume1/data:/data                # Phase 4: READ-WRITE — Curator writes/purges per-item staging dirs under /data/downloads/soulseek (was :ro in the Phase-1 stub)
     restart: unless-stopped
 
 networks:

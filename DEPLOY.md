@@ -115,34 +115,61 @@ Phase 4 performs the first real downloads + imports. Files move like this:
 itself. For the Move to be an atomic hardlink (not a slow cross-volume copy — the #1 import-failure
 cause), slskd, curator, and the *arr must all see the SAME `/data` tree at identical paths.
 
-**4 setup items (all owner-side; Phase 4 code does NOT configure these — it assumes/verifies them):**
+**4 setup items (all owner-side; Phase 4 code does NOT configure these — it assumes/verifies them).
+Run everything from a NAS SSH session as an admin user. Rule of thumb: a path starting `/volume1`
+is the host; a path starting `/data` is inside a container.** The sequence below was verified live on
+2026-05-31 (✅ markers note what was confirmed).
 
 ```bash
-# 1. slskd DOWNLOAD directory -> inside /data  (this is SEPARATE from the shares you already set;
-#    shares = slskd.yml `shares.directories`; downloads = slskd.yml `directories.downloads`).
-#    Edit /volume1/docker/slskd/slskd.yml:
+# ──────────────────────────────────────────────────────────────────────────────
+# 0. Confirm the service UIDs first — the download tree must be owned by slskd's user,
+#    and the *arr must be able to read/move it. (Verified 2026-05-31: slskd=1031:65536, lidarr=root.)
+sudo docker exec slskd id        # expect: uid=1031 gid=65536  (this is the owner the dir tree needs)
+sudo docker exec lidarr id       # if root, it bypasses perms entirely; if non-root it must share gid 65536
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 1. slskd config — ALREADY SET (verified). /volume1/docker/slskd/slskd.yml contains:
 #      directories:
-#        downloads:  /data/downloads/soulseek
-#        incomplete: /data/downloads/soulseek/.incomplete
-#    Must MATCH curator's STAGING_ROOT (default /data/downloads/soulseek). Then: sudo docker restart slskd
+#        incomplete: /data/downloads/incomplete       # in-progress; sibling of soulseek, same /data fs
+#        downloads:  /data/downloads/soulseek          # ✅ MUST match curator STAGING_ROOT (default identical)
+#      shares:
+#        directories:
+#          - /data/media/music                         # ✅ D-11 shares (NOT the download tree — the clean library)
+#          - /data/media/books
+#    `downloads` = where finished files land (Curator imports from here); `shares` = what you upload to peers.
 
-# 2. pre-create the staging root owned by the shared uid/gid (slskd writes here, the *arr reads/moves it)
-sudo mkdir -p /volume1/data/downloads/soulseek/.quarantine
-sudo chown -R 1031:65536 /volume1/data/downloads/soulseek      # slskd UMASK 002 keeps it group-writable for the *arr
+# ──────────────────────────────────────────────────────────────────────────────
+# 2. Pre-create + FIX the staging tree owned by slskd's uid/gid, group-writable.
+#    ⚠ SYNOLOGY GOTCHA: a folder made in DSM File Station is ACL-governed and shows up INSIDE containers
+#    as `d---------` (mode 000) owned by your DSM user (e.g. 1026:100) — containers don't honor Synology
+#    ACLs, so slskd (non-root) is locked out. Create it from the shell instead and chmod to real POSIX bits:
+sudo rmdir /volume1/data/downloads/soulseek 2>/dev/null          # only if empty; skip if it has files
+sudo mkdir -p /volume1/data/downloads/soulseek/.quarantine       # Curator quarantines failed imports here
+sudo mkdir -p /volume1/data/downloads/incomplete                 # slskd in-progress dir
+sudo chown -R 1031:65536 /volume1/data/downloads                 # whole tree -> slskd's user (fixes parent too)
+sudo chmod -R 775 /volume1/data/downloads                        # 775 so gid 65536 (and root-*arr) can write/move
 
-# 3. curator /data mount: flip read-only -> read-write in docker-compose.yml
-#      - /volume1/data:/data        # was :ro (Phase-1 stub). Phase 4 writes/purges staging dirs here.
-#    then: sudo docker compose up -d curator   (recreate)
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. curator /data mount: now ships READ-WRITE in repo docker-compose.yml (was :ro Phase-1 stub).
+#    No manual edit needed — just recreate so the new mount applies:
+sudo docker compose up -d curator
+#    (Curator runs as 1031:65536, so it can create/purge per-item staging + .quarantine dirs under the tree above.)
 
-# 4. VERIFY path identity (make-or-break): the *arr must mount the FULL /volume1/data:/data
-#    (not just a /music sub-path) AND have its root folder at /data/media/music (resp. /data/media/books),
-#    so it can SEE /data/downloads/soulseek for the ManualImport and Move it as a hardlink.
-sudo docker exec lidarr ls /data/downloads/soulseek            # must succeed (same path the *arr sees)
-#    Lidarr UI -> Settings -> Media Management -> Root Folders should list /data/media/music.
-#    (Phase-1 Go/No-Go already proved slskd->*arr hardlink capability on /data; this just confirms the
-#     download path is visible to the *arr too.)
+# ──────────────────────────────────────────────────────────────────────────────
+# 4. VERIFY path identity (make-or-break) — three checks, all must pass:
+sudo docker exec lidarr ls -lan /data/downloads/soulseek
+#    ✅ expect `drwxrwxr-x ... 1031 65536` (NOT d--------- and NOT owner 1026/100).
+sudo docker exec lidarr stat -c '%d  %n' /data/downloads/soulseek /data/media/music
+#    ✅ the two leading device numbers MUST be IDENTICAL = same filesystem = ManualImport Move is an
+#       instant hardlink/rename, not a slow cross-volume copy. (Verified 2026-05-31: both = 45.)
+#    Lidarr UI -> Settings -> Media Management -> Root Folders must list /data/media/music (resp. books).
 ```
 
-Then the D-11 share precondition (already done — shares live, count > 0) gates the first live download.
-Plan **04-05** pauses at this gate and runs the live probes (slskd transfer-state strings, the real
-ManualImport POST envelope, batchId routing) before pinning the offline fixtures to reality.
+**D-11 share gate (last precondition):** in the slskd web UI (`http://<NAS-IP>:5030` → System → Shares)
+confirm the shared file count is **> 0** (force a fresh scan with `sudo docker restart slskd` if it looks
+stale). Sanity: `sudo docker exec slskd ls /data/media/music` must list real albums — if empty the mount is
+wrong, not the share config.
+
+Once path-identity (#4) and the share count (> 0) are green, plan **04-05** runs the live probes (slskd
+transfer-state strings, the real ManualImport POST envelope, batchId routing) and pins the offline fixtures
+to reality. Phase-4 code never configures shares or download dirs — share automation is Phase 5 (SHARE-01/02).
