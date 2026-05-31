@@ -76,7 +76,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
   4. A partial/stalled/failed download is timed out, cancelled, its staging dir cleaned, and the failure recorded/surfaced rather than hanging a slot or silently dropping.
 **Plans**: 5 plans (3 build waves + 1 live-verification wave)
 - [x] 04-01-PLAN.md — Wave 0: migration 0002 (status enum widen + staged_files) + staged_files DAOs + Phase-4 config tunables + offline slskd/manualimport fixtures [IMPORT-05, ACQ-02] ✓ (139 passed)
-- [ ] 04-02-PLAN.md — Wave 0: thin SlskdClient (search/enqueue/watch/cancel, X-API-Key) + staging.py path-traversal guard + purge/quarantine/TTL helpers [ACQ-01, ACQ-02, ACQ-03, IMPORT-01, IMPORT-05]
+- [x] 04-02-PLAN.md — Wave 0: thin SlskdClient (search/enqueue/watch/cancel, X-API-Key) + staging.py path-traversal guard + purge/quarantine/TTL helpers [ACQ-01, ACQ-02, ACQ-03, IMPORT-01, IMPORT-05] ✓ (172 passed)
 - [ ] 04-03-PLAN.md — Wave 1: *arr-agnostic import methods (Lidarr ManualImport-Move + verify-by-requery; Readarr best-effort) + fire-and-forget PlexClient [IMPORT-02, IMPORT-03, IMPORT-04, IMPORT-05]
 - [ ] 04-04-PLAN.md — Wave 2: core/acquire.py composition loop (search→gate→download→stall-watch→import→verify→Plex→purge/quarantine, D-01..D-10) + firewall grep over acquire.py [ACQ-01/02/03, IMPORT-01..05]
 - [ ] 04-05-PLAN.md — Wave 3: D-11 slskd-share precondition checkpoint + live NAS probes (A1 ManualImport envelope / A2 batchId / A3 transfer-state strings) + reconcile fixtures to reality [ACQ-02, ACQ-03, IMPORT-01, IMPORT-02]
@@ -109,7 +109,7 @@ A daemon that runs untouched for N days and keeps filling Lidarr/Readarr gaps fr
 | 1. VPN-Routed Networking Foundation | 4/4 | ✓ Complete (deployed & verified on NAS) | 2026-05-30 |
 | 2. State Ledger + *arr Adapter + Gap Detection | 4/4 | ✓ Complete | 2026-05-30 |
 | 3. Matching & Quality Gating | 5/5 | ✓ Complete | 2026-05-31 |
-| 4. Acquisition, Staging & Clean Import | 1/5 | Executing (Wave 0 started: 04-01 ✓) | - |
+| 4. Acquisition, Staging & Clean Import | 2/5 | Executing (Wave 0 ✓: 04-01, 04-02) | - |
 | 5. Autonomy, Sharing & Self-Recovery | 0/0 | Not started | - |
 | 6. Observability & Notifications | 0/0 | Not started | - |
 
