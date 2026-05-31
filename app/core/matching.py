@@ -129,7 +129,7 @@ def score(
     (the garbage_metadata path), not an exception.
 
     Reads ONLY manifest identity + candidate.parsed_artist/parsed_album/audio_file_count/file_titles.
-    It does NOT read candidate.username / upload_speed / free_upload_slots (Pitfall 5) and does NOT
+    It does NOT read the uploader identity/slots/speed fields (Pitfall 5 — selector-only) and does NOT
     score year / label / catalog / format (anchoring rule, Pitfall 1).
     """
     penalties: List[float] = []
