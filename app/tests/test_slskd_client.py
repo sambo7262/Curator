@@ -253,6 +253,58 @@ def test_cancel_remove_false_passes_false():
     assert recorder[-1]["params"].get("remove") == "false"
 
 
+# --- A2: remote-folder-leaf landing-dir resolution (pinned live 2026-05-31) ---------------------
+
+def test_remote_folder_leaf_splits_on_backslash_and_slash():
+    """A2: slskd lands files under ONLY the last segment of the peer's remote folder, and slskd
+    reports those paths with `\\` separators. _remote_folder_leaf must split on BOTH `\\` and `/`."""
+    from adapters.slskd import _remote_folder_leaf
+
+    assert _remote_folder_leaf("music\\ZHU\\BLACK MIDAS (2026)") == "BLACK MIDAS (2026)"
+    assert _remote_folder_leaf("music/ZHU/BLACK MIDAS (2026)") == "BLACK MIDAS (2026)"
+    assert _remote_folder_leaf("BLACK MIDAS (2026)") == "BLACK MIDAS (2026)"
+    assert _remote_folder_leaf("music\\ZHU\\Album\\") == "Album"     # trailing sep tolerated
+    assert _remote_folder_leaf("") == ""
+    assert _remote_folder_leaf(None) == ""                           # defensive: never raises
+
+
+def test_enqueue_candidate_handle_carries_remote_folder_leaf():
+    """A2: enqueue_candidate returns a TransferHandle whose neutral landing_dir_name is the LEAF of
+    the candidate's remote folder — the dir slskd actually lands the files in (no batchId/username
+    subdir). acquire reads this to point the import + purge at the real landing folder."""
+    from types import SimpleNamespace
+
+    client, _ = _client_for(
+        [(lambda r: r.method == "POST", lambda r: httpx.Response(201, json={}))],
+    )
+    file_obj = SimpleNamespace(filename="music\\ZHU\\BLACK MIDAS (2026)\\01 - Intro.flac", size_bytes=100)
+    cand = SimpleNamespace(
+        username="zhuseed",
+        folder="music\\ZHU\\BLACK MIDAS (2026)",
+        files=[file_obj],
+        audio_files=lambda: [file_obj],
+    )
+    handle = client.enqueue_candidate(cand)
+    assert handle.landing_dir_name == "BLACK MIDAS (2026)"
+    assert handle.username == "zhuseed"
+
+
+def test_enqueue_candidate_leaf_falls_back_to_file_dir_when_folder_empty():
+    """A2 fallback: when the candidate folder is empty, the leaf is derived from a file's directory
+    portion (slskd filenames carry the full `\\`-separated peer path)."""
+    from types import SimpleNamespace
+
+    client, _ = _client_for(
+        [(lambda r: r.method == "POST", lambda r: httpx.Response(201, json={}))],
+    )
+    file_obj = SimpleNamespace(filename="music\\ZHU\\BLACK MIDAS (2026)\\01 - Intro.flac", size_bytes=100)
+    cand = SimpleNamespace(
+        username="zhuseed", folder="", files=[file_obj], audio_files=lambda: [file_obj]
+    )
+    handle = client.enqueue_candidate(cand)
+    assert handle.landing_dir_name == "BLACK MIDAS (2026)"
+
+
 # --- hard-fault posture (slskd is the new primary download path) --------------------------------
 
 def test_search_raises_on_5xx():

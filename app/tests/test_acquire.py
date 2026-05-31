@@ -112,10 +112,16 @@ class FakeSlskd:
         return list(self._responses)
 
     def enqueue_candidate(self, candidate):
-        from adapters.slskd import TransferHandle
+        from adapters.slskd import TransferHandle, _remote_folder_leaf
 
         self.enqueued.append((candidate.username, list(candidate.files)))
-        return TransferHandle(username=candidate.username, transfer_id=candidate.username)
+        # A2: mirror the real client — the handle carries the leaf of the remote folder, which is the
+        # dir slskd actually lands the files in under staging_root (no batchId/username subdir).
+        return TransferHandle(
+            username=candidate.username,
+            transfer_id=candidate.username,
+            landing_dir_name=_remote_folder_leaf(candidate.folder),
+        )
 
     def transfer_progress(self, handle):
         username = handle.username
@@ -469,8 +475,9 @@ def test_empty_importable_subset_quarantines(conn, settings):
     slskd = _FakeSlskdCandidates([cand], progress_script={"seed": [_P(1, "success")]}, complete_after=0)
     adapter = FakeAdapter(candidates_subset=[])   # nothing importable
 
-    # materialize the staging dir so the quarantine MOVE has something to move
-    staging = Path(settings.staging_root) / "curator-lidarr-42"
+    # materialize the REAL slskd landing dir (A2: leaf of the remote folder) so the quarantine MOVE
+    # has something to move.
+    staging = Path(settings.staging_root) / "Delta"
     staging.mkdir(parents=True, exist_ok=True)
 
     out = acquire.acquire_item(
@@ -492,7 +499,8 @@ def test_import_verify_purge_imported(conn, settings):
     subset = [{"path": "/x/01.flac"}, {"path": "/x/02.flac"}]
     adapter = FakeAdapter(candidates_subset=subset, verify_result=True)
 
-    staging = Path(settings.staging_root) / "curator-lidarr-42"
+    # A2: the staging dir slskd lands in is the remote-folder leaf ("Epsilon"), not a curator-* label.
+    staging = Path(settings.staging_root) / "Epsilon"
     staging.mkdir(parents=True, exist_ok=True)
 
     out = acquire.acquire_item(
@@ -512,7 +520,8 @@ def test_verify_false_quarantines(conn, settings):
     slskd = _FakeSlskdCandidates([cand], progress_script={"seed": [_P(1, "success")]}, complete_after=0)
     adapter = FakeAdapter(verify_result=False)
 
-    staging = Path(settings.staging_root) / "curator-lidarr-42"
+    # A2: the staging dir is the remote-folder leaf ("Zeta").
+    staging = Path(settings.staging_root) / "Zeta"
     staging.mkdir(parents=True, exist_ok=True)
 
     out = acquire.acquire_item(
@@ -531,7 +540,8 @@ def test_import_raise_quarantines(conn, settings):
     slskd = _FakeSlskdCandidates([cand], progress_script={"seed": [_P(1, "success")]}, complete_after=0)
     adapter = FakeAdapter(import_raises=True)
 
-    staging = Path(settings.staging_root) / "curator-lidarr-42"
+    # A2: the staging dir is the remote-folder leaf ("Eta").
+    staging = Path(settings.staging_root) / "Eta"
     staging.mkdir(parents=True, exist_ok=True)
 
     out = acquire.acquire_item(
@@ -539,6 +549,42 @@ def test_import_raise_quarantines(conn, settings):
     )
     assert out == "quarantined"
     assert get_gap(conn, "lidarr", "42")["status"] == "quarantined"
+
+
+# ====================================================================================================
+# A2 (pinned live 2026-05-31): the import + purge target is staging_root/<leaf-of-remote-folder>,
+# derived from the BACKSLASH-separated peer remote path — NOT a curator-* / batchId subdir.
+# ====================================================================================================
+
+def test_landing_dir_is_remote_folder_leaf(conn, settings):
+    """A2: a candidate whose remote folder is a deep `music\\ZHU\\BLACK MIDAS (2026)` peer path lands —
+    and is imported/purged — under staging_root/'BLACK MIDAS (2026)' (the LEAF only), with no
+    curator-* / username / batchId subdir. Proves acquire points the import + purge at the real
+    slskd landing folder via the neutral handle leaf."""
+    item = _gap()
+    _seed(conn, item)
+    # slskd reports peer folders with backslash separators; only the last segment is the local dir.
+    cand = _candidate(folder="music\\ZHU\\BLACK MIDAS (2026)", username="zhuseed")
+    slskd = _FakeSlskdCandidates(
+        [cand], progress_script={"zhuseed": [_P(1, "success")]}, complete_after=0
+    )
+    adapter = FakeAdapter(verify_result=True)
+
+    landing = Path(settings.staging_root) / "BLACK MIDAS (2026)"
+    landing.mkdir(parents=True, exist_ok=True)
+
+    out = acquire.acquire_item(
+        item, adapter, slskd, conn, settings, now=FakeClock(),
+        gate_evaluate=_stub_gate({"music\\ZHU\\BLACK MIDAS (2026)"}),
+    )
+    assert out == "imported"
+    # the staged_files row points at the LEAF landing dir, not a curator-* / batchId subdir
+    row = conn.execute("SELECT staging_path FROM staged_files").fetchone()
+    assert row["staging_path"].endswith("/BLACK MIDAS (2026)")
+    assert "curator-" not in row["staging_path"]
+    assert "zhuseed" not in row["staging_path"]
+    # verified import purged exactly that leaf dir (D-05)
+    assert not landing.exists()
 
 
 # ====================================================================================================
@@ -563,7 +609,8 @@ def test_readarr_fault_isolates_music(conn, settings):
     book_adapter = FakeAdapter(app="readarr", verify_result=False)
     music_adapter = FakeAdapter(app="lidarr", verify_result=True)
 
-    (Path(settings.staging_root) / "curator-readarr-7").mkdir(parents=True, exist_ok=True)
+    # A2: the book lands in the remote-folder leaf ("SomeBook").
+    (Path(settings.staging_root) / "SomeBook").mkdir(parents=True, exist_ok=True)
 
     book_out = acquire.acquire_item(
         book, book_adapter, book_slskd, conn, settings, now=FakeClock(),

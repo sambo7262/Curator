@@ -199,7 +199,10 @@ def _import_and_verify(item, adapter, staging_path_str, staged_id, conn, setting
 
 
 def _batch_label(item: GapItem) -> str:
-    """Deterministic per-item staging batch label (the slskd batchId / staging subdir name)."""
+    """Deterministic per-item staging label — the FALLBACK staging subdir name used only when the
+    client could not derive the real slskd landing dir (the leaf of the peer's remote directory, A2).
+    slskd does NOT honor a batchId (A2), so the normal path is the handle's landing_dir_name; this
+    label is just a stable, collision-free default so a leaf-less edge case still has an isolated dir."""
     return f"curator-{item.arr_app}-{item.arr_id}"
 
 
@@ -274,23 +277,33 @@ def acquire_item(
     # 3. Download the winner (then the next-best on stall/failure, D-02). Each candidate's slskd
     #    writes land in an isolated per-item staging dir; a stalled/failed peer is cancelled and we
     #    fall to the next accepted candidate. Exhausted -> stuck (never loop forever).
+    #
+    #    A2 (pinned live 2026-05-31): slskd lands each download under the LEAF of the peer's remote
+    #    folder (no batchId / username subdir). The real landing dir is therefore per-candidate and
+    #    only known AFTER enqueue, so we resolve the staging path from the handle's neutral landing
+    #    dir name once the chosen candidate is enqueued — and point the import + purge at THAT folder.
     item_id = _item_row_id(conn, item)
-    staging_dir = staging.staging_path(settings.staging_root, _batch_label(item))
-    staging_path_str = str(staging_dir)
 
     for cand in accepted:
         repo.set_status(conn, item.arr_app, item.arr_id, "downloading")
-        staged_id = repo.record_staged_file(conn, item_id, staging_path_str) if item_id else None
         # Hand the chosen Candidate across; get back an OPAQUE handle (acquire never reads the
         # uploader identity — that SELECTOR-ONLY field stays in the client; the firewall holds).
         handle = slskd.enqueue_candidate(cand)
+
+        # Resolve the REAL landing dir slskd uses (A2): staging_root / <leaf-of-remote-folder>. Fall
+        # back to the deterministic per-item label only if the client could not derive a leaf.
+        landing_name = getattr(handle, "landing_dir_name", "") or _batch_label(item)
+        staging_dir = staging.staging_path(settings.staging_root, landing_name)
+        staging_path_str = str(staging_dir)
+        staged_id = repo.record_staged_file(conn, item_id, staging_path_str) if item_id else None
 
         outcome = _watch_to_completion(slskd, handle, settings, now, poll_hook)
         if outcome != "success":
             # stalled (already cancelled inside the watch) or hard failure -> next candidate.
             continue
 
-        # 4. Completed -> import + verify + purge / quarantine (D-03/D-05/D-06).
+        # 4. Completed -> import + verify + purge / quarantine (D-03/D-05/D-06). The import source +
+        #    purge/quarantine target is the real landing folder resolved above (A2).
         repo.set_status(conn, item.arr_app, item.arr_id, "importing")
         return _import_and_verify(item, adapter, staging_path_str, staged_id, conn, settings)
 

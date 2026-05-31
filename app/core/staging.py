@@ -34,8 +34,10 @@ _MIN_ROOT_PARTS = 3
 def staging_path(downloads_root: str, batch_id: str) -> Path:
     """Compute the per-item staging dir: downloads_root/{batch_id}. NEVER creates it.
 
-    Directory creation is slskd's job (it materializes the dir when routing the download via the
-    batchId); Curator only needs the deterministic path to watch + later purge/quarantine.
+    Directory creation is slskd's job. A2 (pinned live 2026-05-31): slskd materializes the dir as the
+    LEAF of the peer's remote folder under downloads_root (no batchId/username subdir), so `batch_id`
+    here is normally that resolved landing-dir name (the deterministic curator-{app}-{id} label is a
+    leaf-less fallback). Curator only needs the deterministic path to watch + later purge/quarantine.
     """
     return Path(downloads_root) / batch_id
 
