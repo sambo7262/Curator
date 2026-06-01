@@ -373,7 +373,19 @@ def acquire_item(
         repo.set_status(conn, item.arr_app, item.arr_id, "downloading")
         # Hand the chosen Candidate across; get back an OPAQUE handle (acquire never reads the
         # uploader identity — that SELECTOR-ONLY field stays in the client; the firewall holds).
-        handle = slskd.enqueue_candidate(cand)
+        #
+        # A flaky/offline peer makes slskd 500 the enqueue (or otherwise reject it). The enqueue is
+        # non-idempotent (retry=False), so a single submit failed cleanly — fall to the NEXT accepted
+        # candidate (D-02) rather than letting the raise escape and error-skip the WHOLE item when 200+
+        # other sources are sitting right there. An INFRA_EXC (world unreachable) still propagates so the
+        # scheduler classifies it as infra-skip (no burn) — no point churning candidates against a down VPN.
+        try:
+            handle = slskd.enqueue_candidate(cand)
+        except INFRA_EXC:
+            raise
+        except Exception as e:
+            log.info("%s: enqueue of candidate failed (%s) -> next candidate (D-02)", _identity(item), e)
+            continue
 
         # Resolve the REAL landing dir slskd uses (A2): staging_root / <leaf-of-remote-folder>. Fall
         # back to the deterministic per-item label only if the client could not derive a leaf.

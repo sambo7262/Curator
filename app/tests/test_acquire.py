@@ -487,6 +487,32 @@ def test_terminal_failure_falls_to_next(conn, settings):
     assert slskd.enqueued[-1][0] == "ok_b"
 
 
+def test_enqueue_fault_falls_to_next(conn, settings):
+    """A slskd 500 (or any non-infra fault) on ONE candidate's enqueue falls to the NEXT accepted
+    candidate (D-02) — a flaky/offline peer never error-skips the whole item when 200+ other sources
+    are right there. The first peer's enqueue raises; the second enqueues and imports cleanly."""
+    item = _gap()
+    _seed(conn, item)
+    a = _candidate(folder="Alpha", username="fault_a")
+    b = _candidate(folder="Beta", username="ok_b")
+
+    class _EnqueueFaults(_FakeSlskdCandidates):
+        def enqueue_candidate(self, candidate):
+            if candidate.username == "fault_a":
+                raise RuntimeError("500 Internal Server Error")   # slskd hiccup on a flaky peer
+            return super().enqueue_candidate(candidate)
+
+    script = {"ok_b": [_P(24_000_000, "success")]}
+    slskd = _EnqueueFaults([a, b], progress_script=script, complete_after=0)
+    adapter = FakeAdapter()
+    out = acquire.acquire_item(
+        item, adapter, slskd, conn, settings, now=FakeClock(),
+        gate_evaluate=_stub_gate({"Alpha", "Beta"}), poll_hook=lambda: None,
+    )
+    assert out == "imported"
+    assert slskd.enqueued and slskd.enqueued[-1][0] == "ok_b", "must fall through to the healthy peer"
+
+
 def test_failed_candidate_partial_is_cleaned_up_before_next(conn, settings):
     """A hard-failed candidate (the 8/10-done-2-errored case) has its partial download CANCELLED and
     its staging leaf PURGED before we fall to the next candidate — the 'no leftover junk' guarantee on
