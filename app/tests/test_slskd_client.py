@@ -253,6 +253,40 @@ def test_cancel_remove_false_passes_false():
     assert recorder[-1]["params"].get("remove") == "false"
 
 
+# --- search cleanup (slskd 409-accumulation fix) ----------------------------------------------------
+
+def test_delete_search_issues_delete_on_search_id():
+    """delete_search(id) DELETEs /searches/{id} so slskd drops the tracked search (prevents a later
+    duplicate query from 409-ing)."""
+    recorder = []
+    client, _ = _client_for(
+        [(lambda r: r.method == "DELETE", lambda r: httpx.Response(204))],
+        recorder,
+    )
+    client.delete_search("search-guid-123")
+    rec = recorder[-1]
+    assert rec["method"] == "DELETE"
+    assert rec["path"].endswith("/api/v0/searches/search-guid-123")
+
+
+def test_delete_search_404_is_tolerated():
+    """A search already gone (404) is fine — delete_search must NOT raise on a missing search."""
+    client, _ = _client_for(
+        [(lambda r: r.method == "DELETE", lambda r: httpx.Response(404, json={"error": "gone"}))],
+    )
+    client.delete_search("already-removed")  # no exception
+
+
+def test_delete_search_other_error_surfaces():
+    """A non-2xx, non-404 (e.g. 500) still surfaces (slskd is primary) so the best-effort caller can
+    swallow it explicitly rather than it passing silently."""
+    client, _ = _client_for(
+        [(lambda r: r.method == "DELETE", lambda r: httpx.Response(500, json={"error": "boom"}))],
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        client.delete_search("s1")
+
+
 # --- A2: remote-folder-leaf landing-dir resolution (pinned live 2026-05-31) ---------------------
 
 def test_remote_folder_leaf_splits_on_backslash_and_slash():

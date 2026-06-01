@@ -103,21 +103,37 @@ def _search_query(item: GapItem) -> str:
     return " ".join(parts).strip() or (item.title or "")
 
 
-def _collect_candidates(slskd, query: str, settings, now, build_candidate) -> List[Candidate]:
+def _collect_candidates(slskd, query: str, settings, now, build_candidate, poll_hook) -> List[Candidate]:
     """D-07 fixed collection window: submit one search, poll until the client reports it complete or
     the monotonic window deadline elapses, then build neutral Candidates from the accumulated
     responses. Returns [] when the search could not be submitted.
 
-    `now()` is the injected monotonic clock; a `poll_hook` is NOT used here (the window simply re-polls
-    completeness) — the deadline is advanced by the clock the caller controls in tests."""
+    `now()` is the injected monotonic clock. `poll_hook()` THROTTLES the completeness poll (production
+    sleeps acq_poll_seconds between polls; tests inject a clock-advancer / no-op): WITHOUT it the loop
+    hammered slskd with thousands of GET /searches/{id} per second over the whole window (the daemon
+    log-flood / search-poll busy-loop bug). The hook runs only when the search is NOT yet complete, so
+    a search that completes on the first poll (the common offline-test case) never calls it.
+
+    The slskd search is DELETED after its responses are read (best-effort, in finally): slskd retains
+    every search it tracks and rejects a duplicate query with 409 Conflict, so leaving them behind made
+    the next item — or the same stuck item next cycle — crash on re-search. Deleting our own search as
+    soon as we are done with it keeps slskd's tracked-search set from accumulating."""
     search_id = slskd.search(query)
     if not search_id:
         return []
-    deadline = now() + settings.acq_search_window_seconds
-    while now() < deadline:
-        if slskd.search_is_complete(search_id):
-            break
-    responses = slskd.search_responses(search_id)
+    try:
+        deadline = now() + settings.acq_search_window_seconds
+        while now() < deadline:
+            if slskd.search_is_complete(search_id):
+                break
+            poll_hook()  # throttle: sleep acq_poll_seconds (prod) / advance the fake clock (tests)
+        responses = slskd.search_responses(search_id)
+    finally:
+        # Best-effort cleanup so slskd does not retain this search and 409 a later duplicate query.
+        try:
+            slskd.delete_search(search_id)
+        except Exception as e:  # cleanup must never break acquisition (and may be a no-op test fake)
+            log.debug("search %s cleanup skipped (%s)", search_id, e)
     candidates = []
     for r in responses:
         cand = r if isinstance(r, Candidate) else build_candidate(r)
@@ -289,12 +305,12 @@ def acquire_item(
     #    retry ONCE with a relaxed query (D-08); still declined -> stuck.
     repo.set_status(conn, item.arr_app, item.arr_id, "searching")
     query = _search_query(item)
-    candidates = _collect_candidates(slskd, query, settings, now, build_candidate)
+    candidates = _collect_candidates(slskd, query, settings, now, build_candidate, poll_hook)
     accepted = _accepted_order(candidates, manifest, profile, gate_evaluate)
 
     if not accepted:
         relaxed = _relax_query(query)
-        candidates = _collect_candidates(slskd, relaxed, settings, now, build_candidate)
+        candidates = _collect_candidates(slskd, relaxed, settings, now, build_candidate, poll_hook)
         accepted = _accepted_order(candidates, manifest, profile, gate_evaluate)
         if not accepted:
             log.info("%s: nothing passed the gate after relaxed retry -> stuck", _identity(item))

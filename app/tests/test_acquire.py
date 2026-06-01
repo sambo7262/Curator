@@ -99,6 +99,7 @@ class FakeSlskd:
         self.enqueued = []        # (username, files)
         self.cancelled = []       # (username, transfer_id)
         self.searches = []        # every search text submitted (relaxed retry appends a 2nd)
+        self.deleted = []         # every search id delete_search() was called with (cleanup)
 
     def search(self, text):
         self.searches.append(text)
@@ -110,6 +111,9 @@ class FakeSlskd:
 
     def search_responses(self, search_id):
         return list(self._responses)
+
+    def delete_search(self, search_id):
+        self.deleted.append(search_id)
 
     def enqueue_candidate(self, candidate):
         from adapters.slskd import TransferHandle, _remote_folder_leaf
@@ -334,6 +338,57 @@ def test_search_collection_window_then_gate_once(conn, settings):
     assert len(gate_calls) == 1, "gate.evaluate must be called exactly ONCE per search"
     assert len(slskd.searches) == 1
     assert slskd.enqueued and slskd.enqueued[0][0] == "seeder"
+
+
+def test_search_window_throttles_poll_via_hook(conn, settings):
+    """REGRESSION (daemon search-poll busy-loop): while a search is NOT yet complete, the collection
+    window must call poll_hook between completeness polls (the throttle). WITHOUT this the loop fired
+    thousands of search_is_complete (GET /searches/{id}) per second over the whole window. With a fake
+    clock that only advances inside poll_hook, the window polls exactly as many times as the hook is
+    invoked, so we can assert the hook gates the poll cadence."""
+    item = _gap()
+    _seed(conn, item)
+    folder = "Radiohead - OK Computer (1997) [FLAC]"
+    cand = _candidate(folder=folder)
+    # Search reports incomplete for the first 2 polls, complete on the 3rd.
+    slskd = _FakeSlskdCandidates([cand], progress_script={"seeder": [_P(24_000_000, "success")]},
+                                 complete_after=2)
+    adapter = FakeAdapter()
+    clock = FakeClock()
+    hook_calls = {"n": 0}
+
+    def _hook():
+        # The throttle stand-in for production's time.sleep(acq_poll_seconds): advance the fake clock.
+        hook_calls["n"] += 1
+        clock.advance(1.0)
+
+    out = acquire.acquire_item(
+        item, adapter, slskd, conn, settings, now=clock,
+        gate_evaluate=_stub_gate({folder}), poll_hook=_hook,
+    )
+    assert out == "imported"
+    # The window polled while incomplete and called the throttle each time it was not yet complete.
+    assert hook_calls["n"] >= 2, "poll_hook must throttle each not-yet-complete completeness poll"
+
+
+def test_collected_search_is_deleted_for_cleanup(conn, settings):
+    """REGRESSION (slskd 409 accumulation): after a search's responses are read, acquire must DELETE
+    that search so slskd does not retain it and 409 a later duplicate query. The fake records every
+    delete_search id; a single search -> exactly that search id is cleaned up."""
+    item = _gap()
+    _seed(conn, item)
+    folder = "Radiohead - OK Computer (1997) [FLAC]"
+    cand = _candidate(folder=folder)
+    slskd = _FakeSlskdCandidates([cand], progress_script={"seeder": [_P(1, "success")]}, complete_after=0)
+    adapter = FakeAdapter()
+
+    out = acquire.acquire_item(
+        item, adapter, slskd, conn, settings, now=FakeClock(), gate_evaluate=_stub_gate({folder})
+    )
+    assert out == "imported"
+    # FakeSlskd.search returns 'sid-{n}'; exactly one search was submitted, so exactly that id is cleaned up.
+    assert slskd.deleted == ["sid-1"], "the submitted search must be cleaned up via delete_search"
+    assert len(slskd.deleted) == len(slskd.searches), "one delete_search per submitted search"
 
 
 # ====================================================================================================

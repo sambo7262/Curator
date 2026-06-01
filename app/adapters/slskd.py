@@ -144,6 +144,24 @@ class SlskdClient:
         """
         return bool(self.search_state(search_id).get("isComplete"))
 
+    def delete_search(self, search_id: str) -> None:
+        """DELETE /searches/{id}; drop the search from slskd's tracked set (best-effort cleanup).
+
+        slskd RETAINS every search it tracks and rejects a NEW search whose `searchText` collides with
+        a tracked one with 409 Conflict. The acquisition loop therefore deletes its own search once
+        responses are read so the tracked-search set never accumulates and a later duplicate query
+        (same album/artist, or the same stuck item re-searched) does not 409. A 404 (already gone) is
+        fine; the caller wraps this in a best-effort try/except so a cleanup hiccup never breaks
+        acquisition."""
+        r = self._client.delete(
+            f"{self._base}/searches/{search_id}",
+            headers=self._headers,
+            timeout=30.0,
+        )
+        if r.status_code == 404:
+            return  # already absent — nothing to clean up
+        r.raise_for_status()
+
     def search_responses(self, search_id: str) -> list:
         """GET /searches/{id}/responses; return the list of per-peer response items.
 

@@ -119,13 +119,18 @@ def apply_result(conn, lock: threading.Lock, item: GapItem, outcome: str, settin
                                           if attempt_count >= acq_max_attempts -> status
                                           'permanently-unavailable', next_attempt_at = now + dormant;
                                           else status unchanged outcome, next_attempt_at = now + backoff.
-      "infra-skip" / "skip-usenet-active" / "dry-run" -> NO write (item stays eligible next cycle).
+      "infra-skip" / "skip-usenet-active" / "dry-run" / "error-skip"
+                                       -> NO write (item stays eligible next cycle).
 
     Note acquire_item ALREADY drove the status during its own run (searching/downloading/imported/
     quarantined/stuck) via the connection it was handed; apply_result owns the BACKOFF accounting
     (attempt_count + next_attempt_at) + the terminal transition that acquire_item does not know about.
-    For "imported" we also reset attempt_count to 0 so a later re-detect starts clean."""
-    if outcome in ("infra-skip", "skip-usenet-active", "dry-run"):
+    For "imported" we also reset attempt_count to 0 so a later re-detect starts clean.
+
+    "error-skip" is an UNEXPECTED per-item fault contained in dispatch (e.g. a transient slskd 409 on
+    a duplicate search) — it burns no attempt (the world may simply be busy; never push an item toward
+    permanently-unavailable on a transient fault) and the item retries next cycle."""
+    if outcome in ("infra-skip", "skip-usenet-active", "dry-run", "error-skip"):
         return  # no write — the item remains eligible for a later cycle (no burned attempt)
 
     now = _now_dt()
@@ -159,7 +164,13 @@ def dispatch(items: List[GapItem], by_app: Dict[str, Any], slskd, conn, lock: th
     Pitfall 1 hard cap), preserving input order in the returned outcome list. Each worker is handed a
     LockedConn so acquire_item's own conn.execute writes are serialized through the shared lock too
     (no second connection, no concurrent use of the one connection — D-16). An item whose arr_app has
-    no adapter is skipped as infra-skip (no burn). Returns the per-item outcome strings (order-aligned)."""
+    no adapter is skipped as infra-skip (no burn). Returns the per-item outcome strings (order-aligned).
+
+    Per-item fault containment (Pitfall 5 at item granularity): run_one classifies the INFRA_EXC family
+    itself, but ANY other unexpected exception from one item (e.g. a slskd 409 Conflict on a duplicate
+    search — an HTTPStatusError, NOT infra) must NOT escape the executor and abort the whole cycle
+    (which would skip apply_result for every other item). _work catches it, logs it, and maps it to a
+    no-burn 'error-skip' so the remaining items in the pass still run and persist their outcomes."""
     locked = LockedConn(conn, lock)
     max_workers = max(int(settings.max_concurrent), 1)
 
@@ -168,7 +179,12 @@ def dispatch(items: List[GapItem], by_app: Dict[str, Any], slskd, conn, lock: th
         if adapter is None:
             log.warning("%s: no adapter for arr_app -> infra-skip (no burn)", _identity(item))
             return "infra-skip"
-        return run_one(item, adapter, slskd, locked, settings)
+        try:
+            return run_one(item, adapter, slskd, locked, settings)
+        except Exception as e:  # noqa: BLE001 — one item's fault must never abort the whole cycle
+            log.exception("%s: unexpected fault -> error-skip (no burn); cycle continues (%s)",
+                          _identity(item), e)
+            return "error-skip"
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         outcomes = list(pool.map(_work, items))

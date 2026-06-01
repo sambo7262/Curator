@@ -273,5 +273,48 @@ def test_apply_result_dry_run_writes_nothing():
     assert row["attempt_count"] == 0
 
 
+def test_apply_result_error_skip_writes_nothing():
+    """An 'error-skip' (an unexpected per-item fault contained in dispatch) burns no attempt — the
+    item stays eligible for a later cycle, exactly like infra-skip."""
+    conn = _conn()
+    _seed_item(conn, 1, status="pending", attempt_count=1)
+    lock = threading.Lock()
+    scheduler.apply_result(conn, lock, _item(arr_id="1"), "error-skip", _settings())
+    row = conn.execute(
+        "SELECT status, attempt_count, next_attempt_at FROM items WHERE arr_id='1'"
+    ).fetchone()
+    assert row["status"] == "pending"
+    assert row["attempt_count"] == 1
+    assert row["next_attempt_at"] is None
+
+
+# --------------------------------------------------------------------------- dispatch fault isolation
+def test_dispatch_isolates_one_item_fault_and_continues(monkeypatch):
+    """REGRESSION (a slskd 409 aborted the whole cycle): a NON-infra exception from one item's
+    acquire flow must NOT escape the executor. dispatch maps it to a no-burn 'error-skip' and the
+    OTHER items in the pass still run and return their real outcomes (so apply_result runs for all).
+
+    Without this, run_one only caught INFRA_EXC, so a 409 HTTPStatusError propagated out of pool.map,
+    aborted run_cycle, and skipped apply_result for every other eligible item that cycle."""
+    # First item's acquire raises a non-infra error (stand-in for the slskd 409); second succeeds.
+    def _fake_acquire(item, adapter, slskd, conn, settings):
+        if item.arr_id == "1":
+            raise RuntimeError("409 Conflict on duplicate search (non-infra)")
+        return "imported"
+
+    monkeypatch.setattr(scheduler, "acquire_item", _fake_acquire)
+
+    items = [_item(arr_id="1"), _item(arr_id="2")]
+    by_app = {"lidarr": FakeAdapter(queue_active=False)}
+    conn = _conn()
+    lock = threading.Lock()
+
+    outcomes = scheduler.dispatch(items, by_app, object(), conn, lock, _settings(max_concurrent=1))
+
+    assert outcomes == ["error-skip", "imported"], (
+        "the faulting item is contained as error-skip; the rest of the pass still completes"
+    )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
