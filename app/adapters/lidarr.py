@@ -339,10 +339,27 @@ class LidarrAdapter:
             return []
         # The importability filter (the *arr rejections/tracks reads stay HERE — core stays key-blind):
         # keep only resources Lidarr matched to a wanted track with no rejection.
-        return [
+        importable = [
             res for res in resources
             if isinstance(res, dict) and not res.get("rejections") and res.get("tracks")
         ]
+        # Observability: when Lidarr returns files but NONE are importable, the loop quarantines
+        # silently — surface WHY (rejected quality / no track match), mirroring the gate-decline log.
+        if resources and len(importable) < len(resources):
+            samples = []
+            for res in resources:
+                if res in importable or not isinstance(res, dict):
+                    continue
+                rej = res.get("rejections") or []
+                msgs = [x.get("reason") for x in rej if isinstance(x, dict) and x.get("reason")]
+                samples.append("; ".join(msgs) if msgs else ("no track match" if not res.get("tracks") else "rejected"))
+                if len(samples) >= 5:
+                    break
+            log.info(
+                "manualimport: %d of %d files importable from '%s' (dropped: %s)",
+                len(importable), len(resources), path, " | ".join(samples),
+            )
+        return importable
 
     def execute_import(self, decisions: list) -> None:
         """POST an explicit ManualImport command in importMode="move" for exactly the chosen files

@@ -232,6 +232,7 @@ def _import_and_verify(item, adapter, staging_path_str, staged_id, conn, setting
             log.warning("quarantine of %s failed (%s); recording reason only", _identity(item), e)
             repo.record_quarantine(conn, staged_id, "", f"{reason} (+quarantine move failed: {e})")
         repo.set_status(conn, item.arr_app, item.arr_id, "quarantined")
+        log.info("%s: quarantined -> %s", _identity(item), reason)
         return "quarantined"
 
     decisions = adapter.manual_import_candidates(staging_path_str)
@@ -252,6 +253,7 @@ def _import_and_verify(item, adapter, staging_path_str, staged_id, conn, setting
     except Exception as e:  # a failed purge must not unmark a real import
         log.warning("staging purge of %s hiccuped (ignored): %s", _identity(item), e)
     repo.set_status(conn, item.arr_app, item.arr_id, "imported")
+    log.info("%s: imported %d file(s) -> library", _identity(item), len(decisions))
     return "imported"
 
 
