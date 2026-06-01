@@ -491,9 +491,13 @@ def test_terminal_failure_falls_to_next(conn, settings):
 # ACQ-01/D-08: decline -> one relaxed-query retry -> still decline -> stuck
 # ====================================================================================================
 
-def test_decline_then_relaxed_retry_then_stuck(conn, settings):
+def test_decline_then_relaxed_retry_then_stuck(conn, settings, caplog):
     """Gate declines the first set; acquire retries ONCE with a relaxed query; still declines -> stuck.
-    Two searches total (original + relaxed), gate called twice, never enqueues."""
+    Two searches total (original + relaxed), gate called twice, never enqueues. The decline is LOGGED
+    with the gate's reason trail (the live-loop explainability fix: 'nothing passed the gate' is no
+    longer blind to WHY — quality / fakeflac / match)."""
+    import logging as _logging
+
     item = _gap()
     _seed(conn, item)
     cand = _candidate(folder="Whatever (2019) [Deluxe Edition]")
@@ -504,17 +508,23 @@ def test_decline_then_relaxed_retry_then_stuck(conn, settings):
     def _declining_gate(candidates, manifest, profile, cfg=None, min_kbps=None):
         from core.gate import GateResult
         gate_calls.append(1)
-        return GateResult(decision="decline", chosen=None, distance=1.0, reasons=["no"])
+        return GateResult(decision="decline", chosen=None, distance=1.0,
+                          reasons=["[Whatever] excluded: below cutoff"])
 
-    out = acquire.acquire_item(
-        item, adapter, slskd, conn, settings, now=FakeClock(), gate_evaluate=_declining_gate
-    )
+    with caplog.at_level(_logging.INFO, logger="core.acquire"):
+        out = acquire.acquire_item(
+            item, adapter, slskd, conn, settings, now=FakeClock(), gate_evaluate=_declining_gate
+        )
     assert out == "stuck"
     assert len(slskd.searches) == 2, "original + ONE relaxed retry"
     assert len(gate_calls) == 2
     assert not slskd.enqueued
     # the relaxed query dropped the year/edition noise
     assert "2019" not in slskd.searches[1] and "Deluxe" not in slskd.searches[1]
+    # the gate reason trail is surfaced in the stuck log (so a live operator can see WHY)
+    text = caplog.text
+    assert "nothing passed the gate after relaxed retry" in text
+    assert "below cutoff" in text, "the gate's decline reason must be logged, not swallowed"
 
 
 # ====================================================================================================

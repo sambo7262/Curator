@@ -144,17 +144,21 @@ def _collect_candidates(slskd, query: str, settings, now, build_candidate, poll_
 
 def _accepted_order(
     candidates: List[Candidate], manifest, profile, gate_evaluate
-) -> List[Candidate]:
-    """Run gate.evaluate ONCE over the full candidate set; return the accepted candidates in
-    selection order (best first), or [] on a decline.
+):
+    """Run gate.evaluate ONCE over the full candidate set; return (accepted, reasons) where `accepted`
+    is the accepted candidates in selection order (best first), or [] on a decline, and `reasons` is
+    the gate's explainability trail from the first (authoritative) evaluation.
 
     Re-uses gate + selector semantics rather than re-judging: the winner is the gate's chosen copy;
     the next-best fallback (D-02) is the selector's ordering of the remaining accepted candidates with
     the winner removed and re-run through the SAME gate, so match precision is never re-derived here.
-    The first gate.evaluate call is the authoritative ACCEPT/DECLINE for the set."""
+    The first gate.evaluate call is the authoritative ACCEPT/DECLINE for the set. `reasons` is returned
+    so the caller can LOG why a set was declined (the Soularr-opacity fix extended to the live loop:
+    'nothing passed the gate' is otherwise blind to whether it was quality/fakeflac/match)."""
     result = gate_evaluate(candidates, manifest, profile)
+    reasons = list(getattr(result, "reasons", []) or [])
     if result.decision != "accept" or result.chosen is None:
-        return []
+        return [], reasons
 
     ordered: List[Candidate] = [result.chosen]
     # Build the runner-up order by re-running the gate over the remaining candidates, repeatedly
@@ -166,7 +170,17 @@ def _accepted_order(
             break
         ordered.append(nxt.chosen)
         remaining = [c for c in remaining if c is not nxt.chosen]
-    return ordered
+    return ordered, reasons
+
+
+def _summarize_reasons(reasons: List[str], limit: int = 6) -> str:
+    """Compact one-line summary of a gate reason trail for a log line (avoid a 250-line spew over a
+    full candidate set). Shows the first `limit` reasons and a '(+N more)' tail. Neutral prose only."""
+    if not reasons:
+        return "(no candidates returned by the search)"
+    head = "; ".join(reasons[:limit])
+    extra = len(reasons) - limit
+    return head + (f" (+{extra} more)" if extra > 0 else "")
 
 
 def _watch_to_completion(slskd, handle, settings, now, poll_hook) -> str:
@@ -306,14 +320,17 @@ def acquire_item(
     repo.set_status(conn, item.arr_app, item.arr_id, "searching")
     query = _search_query(item)
     candidates = _collect_candidates(slskd, query, settings, now, build_candidate, poll_hook)
-    accepted = _accepted_order(candidates, manifest, profile, gate_evaluate)
+    accepted, reasons = _accepted_order(candidates, manifest, profile, gate_evaluate)
 
     if not accepted:
+        log.info("%s: query '%s' (%d candidates) declined by gate: %s",
+                 _identity(item), query, len(candidates), _summarize_reasons(reasons))
         relaxed = _relax_query(query)
         candidates = _collect_candidates(slskd, relaxed, settings, now, build_candidate, poll_hook)
-        accepted = _accepted_order(candidates, manifest, profile, gate_evaluate)
+        accepted, reasons = _accepted_order(candidates, manifest, profile, gate_evaluate)
         if not accepted:
-            log.info("%s: nothing passed the gate after relaxed retry -> stuck", _identity(item))
+            log.info("%s: nothing passed the gate after relaxed retry '%s' (%d candidates) -> stuck: %s",
+                     _identity(item), relaxed, len(candidates), _summarize_reasons(reasons))
             repo.set_status(conn, item.arr_app, item.arr_id, "stuck")
             return "stuck"
 

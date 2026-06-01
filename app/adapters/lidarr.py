@@ -24,6 +24,25 @@ from core.quality import (
 
 log = logging.getLogger(__name__)
 
+
+def _resolve_profile_id(rec: dict):
+    """Resolve the quality profile id for a wanted album, preferring the ARTIST's profile.
+
+    Lidarr quality profiles are ARTIST-level. The album record's own `profileId` is a legacy field
+    that is 0 for many albums — and a profileId of 0 makes get_quality_profile do GET
+    /qualityprofile/0 -> 404, which the acquire loop reads as 'manifest/profile unavailable' and marks
+    the album 'stuck (no search)' FOREVER (it is never even searched). Since the wanted query embeds
+    the artist (includeArtist=true), prefer the artist's qualityProfileId when it is a valid (>0) id,
+    and fall back to the album-level `profileId` only when the artist's is absent/invalid — so the
+    behavior is never worse than before, and the 0-profileId albums become searchable. The `profileId`
+    / `qualityProfileId` wire keys stay here in the adapter (the firewall)."""
+    artist = rec.get("artist") or {}
+    artist_pid = artist.get("qualityProfileId")
+    if isinstance(artist_pid, int) and artist_pid > 0:
+        return artist_pid
+    return rec.get("profileId")
+
+
 # *arr quality NAME -> neutral QualityRank. This map is the firewall boundary: the *arr quality-name
 # vocabulary lives ONLY here (lidarr.py), and the adapter emits ONLY the neutral int ranks into core.
 # Lidarr quality names (per the qualityprofile API's nested quality {id,name}) are lower-cased and
@@ -141,7 +160,7 @@ class LidarrAdapter:
             title=rec.get("title"),
             artist_or_author=artist.get("artistName"),
             foreign_id=rec.get("foreignAlbumId"),
-            quality_profile_id=rec.get("profileId"),   # album-level profile id (the `profileId` key)
+            quality_profile_id=_resolve_profile_id(rec),
             raw=rec,
         )
 

@@ -15,9 +15,30 @@ import json
 import httpx
 
 from adapters.base import ArrAdapter, GapItem
-from adapters.lidarr import LidarrAdapter
+from adapters.lidarr import LidarrAdapter, _resolve_profile_id
 from core.manifest import Manifest
 from core.quality import RANK_ALAC, RANK_FLAC, RANK_MP3_320, Profile
+
+
+# --- quality-profile resolution (artist-level, fixes the profileId=0 -> 404 -> permanent-stuck bug) ---
+
+def test_resolve_profile_prefers_artist_when_album_profile_is_zero():
+    """REGRESSION: Lidarr quality profiles are artist-level; the album record's `profileId` is 0 for
+    many albums, and profileId=0 -> GET /qualityprofile/0 -> 404 -> 'stuck (no search)' FOREVER.
+    The embedded artist's qualityProfileId (includeArtist=true) must win over a 0 album profileId."""
+    rec = {"id": 7, "profileId": 0, "artist": {"artistName": "Queen", "qualityProfileId": 3}}
+    assert _resolve_profile_id(rec) == 3
+
+
+def test_resolve_profile_falls_back_to_album_when_artist_absent():
+    """When the artist has no usable qualityProfileId, fall back to the album profileId (never worse
+    than the old behavior)."""
+    assert _resolve_profile_id({"id": 1, "profileId": 2, "artist": {"artistName": "X"}}) == 2
+    assert _resolve_profile_id({"id": 1, "profileId": 2}) == 2
+    # artist profile of 0 is NOT a valid id -> fall back to the album profile id
+    assert _resolve_profile_id(
+        {"id": 1, "profileId": 5, "artist": {"qualityProfileId": 0}}
+    ) == 5
 
 
 def test_missing_mapping(httpx_client, load_fixture):
