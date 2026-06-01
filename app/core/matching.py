@@ -196,12 +196,29 @@ def recommend(
             best_r + [f"DECLINE total={best_d:.2f} > strong={cfg.strong_thresh:.2f}"],
         )
 
-    if len(ordered) > 1 and (ordered[1][0] - best_d) < cfg.rec_gap_thresh:
+    # Rec-gap ambiguity, BUT album-aware: a near-tie runner-up that is the SAME release as the best
+    # (multiple uploaders sharing the same correct album — the common case for any popular title) is
+    # NOT ambiguity — the selector picks the best SOURCE among them. Genuine ambiguity is a DIFFERENT
+    # release tying within the gap ("which album is this?"). Decline ONLY when a within-gap rival is a
+    # different (artist, album) than the best; same-album copies fall through to ACCEPT (RESEARCH §3,
+    # the rec-gap was always meant to guard cross-release confusion, not same-release duplication).
+    best_key = (_norm(best_c.parsed_artist), _norm(best_c.parsed_album))
+    rivals = [
+        c
+        for d, c, _ in ordered[1:]
+        if (d - best_d) < cfg.rec_gap_thresh
+        and (_norm(c.parsed_artist), _norm(c.parsed_album)) != best_key
+    ]
+    if rivals:
         return (
             "decline",
             None,
             best_d,
-            best_r + ["DECLINE ambiguous: runner-up within rec_gap"],
+            best_r
+            + [
+                f"DECLINE ambiguous: different release within rec_gap "
+                f"('{rivals[0].parsed_artist}' / '{rivals[0].parsed_album}')"
+            ],
         )
 
     return (

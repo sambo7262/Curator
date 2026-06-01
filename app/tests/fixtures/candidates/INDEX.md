@@ -43,8 +43,8 @@ one (Pitfall 3: calibrate to the labels, tune the number not the test).
 | `incomplete_tracks` | standard_12track | lossless_only | **DECLINE** | only 4 of 12 tracks — track-count completeness gap pushes total > strong_thresh |
 | `wrong_album` | standard_12track | lossless_only | **DECLINE** | correct artist but wrong album (Kid A vs OK Computer) — album sub-distance too high |
 | `wrong_edition` | standard_12track | lossless_only | **DECLINE** | Deluxe/OKNOTOK edition, 23 tracks vs 12 — track-count mismatch declines the long-tail edition |
-| `ambiguous_twin_a` | standard_12track | lossless_only | **DECLINE** | near-tie with twin_b within rec_gap_thresh → ambiguous (only meaningful WITH twin_b in the scored set) |
-| `ambiguous_twin_b` | standard_12track | lossless_only | **DECLINE** | the other half of the rec-gap near-tie (only meaningful WITH twin_a in the scored set) |
+| `ambiguous_twin_a` | standard_12track | lossless_only | **ACCEPT** | two uploaders sharing the SAME release: same-album near-tie is NOT ambiguity → ACCEPT, selector picks the source (reversed 2026-05-31 after live evidence; only meaningful WITH twin_b in the scored set) |
+| `ambiguous_twin_b` | standard_12track | lossless_only | **ACCEPT** | the other identical copy of the same release — the selector ratifies one source (only meaningful WITH twin_a in the scored set) |
 | `fake_flac` | standard_12track | lossless_only | **DECLINE** | claims .flac but ~128 kbps effective bytes/sec (< 400 floor) + lossy source token — fakeflac REJECT, not a match failure |
 | `below_cutoff_mp3` | standard_12track | **mp3_320_cutoff** (and lossless_only) | **DECLINE** | correct/complete but MP3-192 (rank 1) below cutoff in BOTH profiles — **QUAL-02 REJECT direction** (no-downgrade); straddles the boundary opposite known_good_mp3_320 |
 | `garbage_metadata` | standard_12track | lossless_only | **DECLINE** | meaningless folder name folds to None artist/album; matcher scores max-penalty → DECLINE and NEVER throws (error-path robustness) |
@@ -58,6 +58,8 @@ The corpus straddles the QUAL-02 cutoff boundary in **both directions** against 
 - **PERMIT:** `known_good_mp3_320` (MP3-320, rank 3) → **ACCEPT** (at cutoff, allowed).
 - **REJECT:** `below_cutoff_mp3` (MP3-192, rank 1) → **DECLINE** (below cutoff).
 
-And the match-confidence boundary is straddled by `borderline_accept` (just inside strong) vs
-`ambiguous_twin_a`/`ambiguous_twin_b` (rec-gap ambiguous → decline) vs `incomplete_tracks` /
-`wrong_album` / `wrong_edition` (clearly outside).
+And the match-confidence boundary is straddled by `borderline_accept` (just inside strong) and
+`ambiguous_twin_a`/`ambiguous_twin_b` (same-album near-tie → ACCEPT, selector picks source) vs
+`incomplete_tracks` / `wrong_album` / `wrong_edition` (clearly outside → decline). Genuine
+cross-release ambiguity (two DIFFERENT albums within rec_gap → decline) is proven in
+test_matching.test_recommend_different_release_within_gap_declines.

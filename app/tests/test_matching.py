@@ -189,28 +189,50 @@ def test_recommend_clear_winner_accepts(load_fixture):
     assert any("ACCEPT total=" in r and "<= strong=" in r for r in out_r)
 
 
-def test_recommend_ambiguous_twins_decline_via_rec_gap(load_fixture):
-    """The ambiguous_twin_a + twin_b pair, scored together, DECLINES via the REC-GAP branch.
+def test_recommend_same_album_copies_accept_not_ambiguous(load_fixture):
+    """Two copies of the SAME release (ambiguous_twin_a/b are identical OK Computer FLAC folders)
+    near-tying within rec_gap is NOT ambiguity -> ACCEPT (the selector picks the best SOURCE).
 
-    Asserted distinctly from the strong-thresh branch: each twin individually scores <= strong (so
-    the strong check would PASS), but their distances are within rec_gap of each other, so the
-    runner-up-gap condition forces decline. The reason must be the ambiguous one, NOT the over-strong
-    one (proves it is the rec-gap branch, not the threshold branch, that fires).
+    LIVE REVERSAL (2026-05-31): the original Phase-3 decision declined same-album near-ties as
+    'ambiguous'. The live NAS daemon proved that wrong — a Queen 'A Kind of Magic' FLAC scored 0.00
+    yet was declined because other uploaders' copies of the SAME album tied within rec_gap, so EVERY
+    popular title was thrown away. recommend() is now album-aware: a within-gap rival only triggers
+    the ambiguous decline when it is a DIFFERENT (artist, album). Same-album copies fall through to
+    ACCEPT; matching != selection still holds (the selector ratifies the source on accept).
     """
     man = _manifest(load_fixture, "standard_12track")
     a = _candidate(load_fixture, "ambiguous_twin_a")
     b = _candidate(load_fixture, "ambiguous_twin_b")
     ad, ar = score(a, man)
     bd, br = score(b, man)
-    # precondition: each twin alone is good enough to clear strong (so only rec-gap can decline)
+    # precondition: each twin alone clears strong AND they're within rec_gap (a same-album near-tie)
     assert ad <= MatchConfig().strong_thresh and bd <= MatchConfig().strong_thresh
-    # precondition: the two are within rec_gap of each other (a genuine near-tie)
     assert abs(ad - bd) < MatchConfig().rec_gap_thresh
+    # precondition: they ARE the same parsed release (so the album-aware branch treats them as copies)
+    assert (a.parsed_artist, a.parsed_album) == (b.parsed_artist, b.parsed_album)
     decision, chosen, out_d, out_r = recommend([(ad, a, ar), (bd, b, br)])
+    assert decision == "accept"
+    assert any("ACCEPT total=" in r for r in out_r)
+
+
+def test_recommend_different_release_within_gap_declines():
+    """Genuine cross-release ambiguity is preserved: two DIFFERENT albums tying within rec_gap ->
+    DECLINE (the 'which album is this?' case the rec-gap was always meant to guard). Distances are
+    injected so the decision logic is exercised deterministically, independent of scorer calibration.
+    """
+    a = build_candidate({
+        "folder": "Radiohead - OK Computer (1997) [FLAC]",
+        "files": [{"filename": "01 - Airbag.flac"}, {"filename": "02 - Paranoid Android.flac"}],
+    })
+    b = build_candidate({
+        "folder": "Radiohead - Kid A (2000) [FLAC]",
+        "files": [{"filename": "01 - Everything In Its Right Place.flac"}, {"filename": "02 - Kid A.flac"}],
+    })
+    assert (a.parsed_artist, a.parsed_album) != (b.parsed_artist, b.parsed_album)
+    decision, chosen, out_d, out_r = recommend([(0.10, a, []), (0.12, b, [])])
     assert decision == "decline"
     assert chosen is None
-    assert any("ambiguous" in r for r in out_r)
-    assert not any("> strong=" in r for r in out_r)  # NOT the strong-thresh branch
+    assert any("different release" in r for r in out_r)
 
 
 def test_borderline_accept_just_inside_strong(load_fixture):

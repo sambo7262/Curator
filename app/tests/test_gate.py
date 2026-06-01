@@ -173,20 +173,22 @@ def test_declines_fake_flac(load_fixture):
     assert any("excluded" in r and "fakeflac REJECT" in r for r in result.reasons)
 
 
-def test_declines_ambiguous(load_fixture):
-    """The ambiguous_twin pair, evaluated TOGETHER, declines via the rec-gap branch (not strong-thresh).
+def test_same_album_copies_accept_and_selector_picks_source(load_fixture):
+    """The identical twin pair (two uploaders sharing the SAME OK Computer FLAC), evaluated TOGETHER,
+    ACCEPTS and the selector ratifies one source — same-album copies are NOT ambiguity.
 
-    Both twins clear quality+fakeflac and each alone clears strong, but their distances are within
-    rec_gap of each other -> ambiguous -> decline. Proves the composed gate routes a near-tie through
-    recommend()'s rec-gap branch (matching != selection: selector never even runs on a decline)."""
+    LIVE REVERSAL (2026-05-31): the composed gate used to decline this near-tie as ambiguous, which
+    on the live NAS threw away every popular album (a 0.00 Queen match declined because other copies
+    tied). recommend() is now album-aware: same (artist, album) copies accept and the selector picks
+    the best SOURCE among them (matching != selection — the selector runs only on accept)."""
     a = _candidate(load_fixture, "ambiguous_twin_a")
     b = _candidate(load_fixture, "ambiguous_twin_b")
     man = _manifest(load_fixture, "standard_12track")
     prof = _profile(load_fixture, "lossless_only")
     result = evaluate([a, b], man, prof)
-    assert result.decision == "decline"
-    assert result.chosen is None
-    assert any("ambiguous" in r for r in result.reasons)
+    assert result.decision == "accept"
+    assert result.chosen in (a, b)        # selector ratified one of the same-album copies
+    assert any("selected" in r for r in result.reasons)
 
 
 def test_declines_incomplete(load_fixture):
