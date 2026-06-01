@@ -279,6 +279,50 @@ def test_get_manifest_graceful_without_track_list():
     assert man.track_count == 9
 
 
+def test_get_manifest_track_count_from_statistics():
+    """LIVE REGRESSION: Lidarr's album record has NO top-level trackCount and no inline release track
+    list — the real count lives in statistics.totalTrackCount. Reading the missing top-level field
+    yielded track_count=0, which maxed matching._track_count_distance and floored EVERY candidate at
+    ~0.40 (nothing ever accepted). The resolver must pull the count from statistics."""
+    album_json = [{
+        "title": "Safety EP",
+        "artist": {"artistName": "Coldplay"},
+        "statistics": {"trackFileCount": 0, "trackCount": 0, "totalTrackCount": 3},
+        "releases": [{"monitored": True, "trackCount": 3}],
+    }]
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/v1/album"):
+            return httpx.Response(200, json=album_json)
+        return httpx.Response(404, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    man = LidarrAdapter("http://test-arr", "k", client).get_manifest("mbid-coldplay")
+    assert man.artist == "Coldplay"
+    assert man.album == "Safety EP"
+    assert man.track_count == 3          # NOT 0 — the bug that floored every match at 0.40
+
+
+def test_get_manifest_track_count_from_monitored_release_when_no_statistics():
+    """Fallback chain: no statistics block -> take the monitored release's trackCount (not the first)."""
+    album_json = [{
+        "title": "A", "artist": {"artistName": "B"},
+        "releases": [
+            {"monitored": False, "trackCount": 17},   # a deluxe edition we are NOT tracking
+            {"monitored": True, "trackCount": 10},     # the monitored release is authoritative
+        ],
+    }]
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/v1/album"):
+            return httpx.Response(200, json=album_json)
+        return httpx.Response(404, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    man = LidarrAdapter("http://test-arr", "k", client).get_manifest("mbid-b")
+    assert man.track_count == 10
+
+
 def test_lidarr_now_exposes_profile_and_manifest_methods(httpx_client):
     """Both new Phase-3 methods are now callable on the concrete adapter (Protocol conformance)."""
     adapter = LidarrAdapter("http://test-arr", "k", httpx_client({}))

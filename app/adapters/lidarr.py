@@ -269,9 +269,31 @@ class LidarrAdapter:
             if titles:
                 break
 
-        track_count = rec.get("trackCount")
-        if not isinstance(track_count, int):
-            track_count = len(titles)
+        # Track count: the album-distance completeness driver (matching._track_count_distance maxes
+        # out at 1.0 when this is <= 0 — a 0 here floors EVERY candidate at ~0.40 and nothing ever
+        # accepts). Lidarr's album record carries NO usable top-level `trackCount`; the real count is
+        # in `statistics.totalTrackCount` (album-total, download-state-agnostic) and on each release's
+        # `trackCount`. Resolve the first positive int across those, preferring the monitored release;
+        # fall back to the per-track title count only as a last resort. All *arr keys stay in-adapter.
+        track_count = None
+        stats = rec.get("statistics") or {}
+        if isinstance(stats, dict):
+            for v in (stats.get("totalTrackCount"), stats.get("trackCount")):
+                if isinstance(v, int) and v > 0:
+                    track_count = v
+                    break
+        if track_count is None:
+            for rel in rec.get("releases") or []:
+                if not isinstance(rel, dict):
+                    continue
+                rc = rel.get("trackCount")
+                if isinstance(rc, int) and rc > 0:
+                    track_count = rc
+                    if rel.get("monitored"):
+                        break  # the monitored release is authoritative; otherwise keep the first seen
+        if not isinstance(track_count, int) or track_count <= 0:
+            top = rec.get("trackCount")
+            track_count = top if isinstance(top, int) and top > 0 else len(titles)
 
         return Manifest(
             artist=artist.get("artistName") or "",
