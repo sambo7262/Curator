@@ -43,9 +43,9 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-05-31 (resumed)
-Stopped at: 05-05 ✓ COMPLETE — Phase 5 is CODE COMPLETE (all 5 plans). Status surface + scheduler/reconcile lifecycle wiring landed; suite 277 green (exit 0), firewall clean. Two PENDING owner NAS actions remain (NOT code, see Last action 05-05): the A2/A3 live curl probes (05-05-LIVE-PROBE.md) + the D-06 staged rollout (DEPLOY.md Step 9). Next build work is Phase 6 (Observability & Notifications). Push these 5 commits (ed6d354 / 97bf576 / 1b9e4a0 / 0d0c867 + this docs commit) to origin/main.
-Resume file: none (no HANDOFF/.continue-here)
+Last session: 2026-05-31 (LIVE-DEBUG of the Phase-5 daemon on the NAS — staged rollout MAX_CONCURRENT=1)
+Stopped at: Iteratively debugging the live cycle from owner-pasted slskd + curator logs. **4 fixes pushed to origin/main** beyond Phase-5 code-complete: `eb4540c` (search-poll flood + 409 cycle-crash isolation + delete_search cleanup), `35c6cd3` (Lidarr profile from artist + gate-decline logging), `f2e775a` (derive candidate folder from slskd file paths — matching was dead, every cand dist=1.00), `be565b3` (recurse into Lidarr quality GROUPS — get_quality_profile returned allowed=[] so every candidate incl. FLAC was rejected). All pure code (no env/yaml). Local suite 296 green. **Awaiting owner redeploy of the be565b3 image + next cycle log to confirm the first successful import** (expect non-empty allowed=[..], FLAC passes, searching→downloading→importing→imported). OUTSTANDING: transient 409 = slskd↔gluetun VPN flap (owner-side, contained as no-burn error-skip; optional Curator search-retry not built). FULL CONTEXT in memory phase5-live-debug. Phase 6 (Observability) is the next BUILD work once live acceptance passes.
+Resume file: none (no HANDOFF/.continue-here) — resume by pasting the next slskd+curator logs, or /gsd-resume-work.
 
 ## Active Phase Detail
 
