@@ -131,6 +131,16 @@ def record_staged_file(conn: sqlite3.Connection, item_id: int, staging_path: str
     return cur.lastrowid
 
 
+def staging_paths_for(conn: sqlite3.Connection, item_id: int) -> List[str]:
+    """Every staging dir ever recorded for this item (newest first) — the startup-reconcile cleanup
+    reads these to purge an abandoned in-flight download's leftover files (no orphaned junk)."""
+    rows = conn.execute(
+        "SELECT staging_path FROM staged_files WHERE item_id = ? ORDER BY id DESC",
+        (item_id,),
+    ).fetchall()
+    return [r["staging_path"] for r in rows if r["staging_path"]]
+
+
 def record_quarantine(
     conn: sqlite3.Connection, staged_file_id: int, quarantine_path: str, reason: str
 ) -> None:

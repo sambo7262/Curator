@@ -394,6 +394,41 @@ class SlskdClient:
         )
         r.raise_for_status()
 
+    def clear_all_downloads(self) -> int:
+        """Cancel+remove EVERY tracked download — the startup orphan sweep (REL-02 cross-restart).
+
+        Curator is the ONLY initiator of slskd DOWNLOADS (uploads are a separate, untouched queue), and
+        startup reconcile already resets every in-flight ledger item to 'pending' for a clean re-attempt
+        — so any download slskd is still tracking on a fresh boot is an ABANDONED transfer from a prior
+        run (a redeploy/crash mid-download). Clearing them here stops the orphan from completing as
+        un-imported junk and prevents the duplicate re-download. Called ONLY at startup, before any
+        watch is active, so it can never race a live acquisition. Best-effort per file (an already-gone
+        transfer is skipped); returns the count cancelled. The per-user/file wire shape is walked
+        defensively via _iter_file_records (robust to slskd's nesting)."""
+        r = self._send("GET", f"{self._base}/transfers/downloads", timeout=30.0)
+        if r.status_code == 404:
+            return 0
+        r.raise_for_status()
+        body = r.json()
+        users = body if isinstance(body, list) else [body]
+        n = 0
+        for user in users:
+            if not isinstance(user, dict):
+                continue
+            username = user.get("username")
+            if not username:
+                continue
+            for rec in _iter_file_records(user):
+                tid = rec.get("id")
+                if not tid:
+                    continue
+                try:
+                    self.cancel(username, tid, remove=True)
+                    n += 1
+                except Exception as e:  # already gone / transient — keep clearing the rest
+                    log.warning("clear_all_downloads: cancel of one transfer hiccuped (ignored): %s", e)
+        return n
+
     # --- Phase 5: shares ensure / self-heal (SHARE-01/02, D-10) ---------------------------------
     # The slskd `shares.files` count read + the rescan trigger live HERE (the firewall): core/shares.py
     # (05-03) consumes ONLY the neutral int + bool these return, never an *arr/slskd wire key. Same

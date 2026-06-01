@@ -429,6 +429,42 @@ def test_cancel_transfer_resolves_real_ids_and_deletes_each():
     assert all(e["params"].get("remove") == "true" for e in deletes)
 
 
+def test_clear_all_downloads_cancels_every_tracked_file():
+    """The startup orphan sweep GETs the full downloads list and DELETEs each file by its real id
+    (cross-restart cleanup so an abandoned transfer can't complete as un-imported junk)."""
+    all_body = [
+        {"username": "winterwulf", "directories": [{"files": [
+            {"id": "w1", "filename": _F1, "state": "InProgress"},
+            {"id": "w2", "filename": _F2, "state": "Completed, Succeeded"},
+        ]}]},
+        {"username": "arcplug166", "directories": [{"files": [
+            {"id": "a1", "filename": "music\\Queen\\The Miracle\\01.flac", "state": "InProgress"},
+        ]}]},
+    ]
+    recorder = []
+    client, rec = _client_for(
+        [
+            (lambda r: r.method == "GET" and r.url.path.endswith("/transfers/downloads"),
+             lambda r: httpx.Response(200, json=all_body)),
+            (lambda r: r.method == "DELETE", lambda r: httpx.Response(204)),
+        ],
+        recorder=recorder,
+    )
+    n = client.clear_all_downloads()
+    assert n == 3
+    deletes = {e["path"].rsplit("/", 1)[-1] for e in rec if e["method"] == "DELETE"}
+    assert deletes == {"w1", "w2", "a1"}
+
+
+def test_clear_all_downloads_empty_is_zero():
+    """No tracked downloads (404 or empty list) -> 0 cancelled, no DELETEs, never raises."""
+    client, rec = _client_for(
+        [(lambda r: r.method == "GET", lambda r: httpx.Response(404, json={}))],
+    )
+    assert client.clear_all_downloads() == 0
+    assert not [e for e in rec if e["method"] == "DELETE"]
+
+
 # --- hard-fault posture (slskd is the new primary download path) --------------------------------
 
 def test_search_raises_on_5xx():

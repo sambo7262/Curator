@@ -80,6 +80,57 @@ def _gapitem_from_row(row: sqlite3.Row) -> GapItem:
     )
 
 
+def _purge_item_staging(conn: sqlite3.Connection, item_id: int, settings: Any) -> None:
+    """Purge every staging dir recorded for an item whose in-flight download we're abandoning on boot.
+
+    A crash/redeploy mid-download leaves the peer's partial (or fully-completed-but-never-imported)
+    files on disk under staging_root/<leaf>. Since reconcile is resetting the item to 'pending' for a
+    clean re-attempt, those leftovers are orphaned junk — purge them (guarded by assert_under_root
+    inside purge_staging) so a restart never accumulates duplicate downloads. Best-effort; never raises
+    (a purge hiccup must not block the boot reconcile). No-op when the item has no staged_files rows."""
+    from core import staging
+
+    for path in repo.staging_paths_for(conn, item_id):
+        try:
+            staging.purge_staging(path, settings.staging_root)
+        except Exception as e:  # a purge hiccup must never block reconcile
+            log.warning("reconcile: purge of orphaned staging '%s' hiccuped (ignored): %s", path, e)
+
+
+def clear_orphaned_downloads_on_start(settings: Any) -> int:
+    """Cancel+remove every download slskd is still tracking on boot — the cross-restart orphan sweep.
+
+    A redeploy/crash mid-download leaves the slskd transfer running (slskd persists downloads across a
+    Curator restart); reconcile resets the ledger item to 'pending' to re-attempt it, but without this
+    the abandoned transfer keeps going, completes as un-imported junk, and the re-attempt DUPLICATES the
+    download. Curator owns slskd's download queue (uploads are separate), and this runs at startup
+    before any watch is active, so clearing it is safe. Gated by settings.acq_clear_downloads_on_start
+    (default True) so it can be disabled WITHOUT a rebuild. Builds + closes its own slskd client
+    (CR-02); an infra fault (slskd/VPN down this boot) is swallowed — the sweep is best-effort and must
+    never block startup. Returns the count cancelled."""
+    if not getattr(settings, "acq_clear_downloads_on_start", True):
+        return 0
+
+    clients = []
+    try:
+        from core.acquire import build_acquire_clients
+
+        slskd, clients = build_acquire_clients(settings)   # may raise (e.g. missing key offline)
+        n = slskd.clear_all_downloads()
+        if n:
+            log.info("reconcile: cleared %d orphaned slskd download(s) on boot (cross-restart sweep)", n)
+        return n
+    except Exception as e:  # slskd/VPN unreachable or unconfigured this boot — skip; never block startup
+        log.warning("reconcile: orphaned-download sweep skipped (%s)", e)
+        return 0
+    finally:
+        for c in clients:
+            try:
+                c.close()
+            except Exception:
+                pass
+
+
 def rearm_stuck_on_start(conn: sqlite3.Connection, lock: Any, settings: Any) -> int:
     """Clear the retry backoff on every stuck/quarantined/permanently-unavailable row at boot.
 
@@ -168,6 +219,11 @@ def reconcile_on_startup(
                         # STATUS ONLY: attempt_count is deliberately NOT touched here (no record_
                         # attempt) because the interruption was infra, not a genuine fail (D-14).
                         repo.set_status(conn, item.arr_app, item.arr_id, "pending")
+                        # Purge the abandoned download's leftover staging files so the re-attempt
+                        # starts clean (no orphaned junk, no half-album on disk). row["id"] is the
+                        # items PK = the staged_files FK.
+                        if getattr(settings, "acq_clear_downloads_on_start", True):
+                            _purge_item_staging(conn, row["id"], settings)
                         log.info(
                             "reconcile: %s orphaned in '%s' -> reset to pending (no attempt burned)",
                             _identity(item),

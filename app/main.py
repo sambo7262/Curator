@@ -52,7 +52,11 @@ def _startup() -> None:
     offline 3.9 sandbox and tests can monkeypatch build_adapters / Scheduler / reconcile_on_startup.
     """
     from core.gap_detector import build_adapters
-    from core.reconcile import reconcile_on_startup, rearm_stuck_on_start
+    from core.reconcile import (
+        reconcile_on_startup,
+        rearm_stuck_on_start,
+        clear_orphaned_downloads_on_start,
+    )
     from core.scheduler import Scheduler
 
     conn = connect(settings.db_path)
@@ -65,6 +69,12 @@ def _startup() -> None:
     # acq_reset_stuck_on_start, default on). Pure DB op under the shared lock — runs BEFORE the
     # adapter-dependent reconcile so an *arr/VPN flap at boot can never skip it.
     rearm_stuck_on_start(conn, _detect_lock, settings)
+
+    # Cross-restart orphan sweep: cancel downloads slskd is still running from a prior container
+    # (a redeploy/crash abandoned them) BEFORE reconcile re-queues their items — so the abandoned
+    # transfer can't complete as un-imported junk and the re-attempt won't duplicate it. Self-guarded
+    # (a slskd/VPN fault this boot is swallowed) so it never blocks startup.
+    clear_orphaned_downloads_on_start(settings)
 
     # D-14/REL-02: reset crash orphans cleanly (verify-by-requery guard, no double-import, no burn).
     # Defensive: a boot-time infra/config fault while BUILDING the adapters (e.g. *arr unreachable or

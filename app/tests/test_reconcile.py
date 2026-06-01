@@ -237,3 +237,78 @@ def test_rearm_is_a_noop_when_disabled(conn):
     assert n == 0
     assert _status_of(conn, "70") == "stuck"
     assert _attempt_of(conn, "70") == 2
+
+
+# --- cross-restart orphan cleanup: purge abandoned staging + sweep slskd's download queue ----------
+
+def test_reset_orphan_purges_its_abandoned_staging(conn, tmp_path):
+    """A reset in-flight orphan has its recorded staging dir (the abandoned partial/complete download)
+    PURGED so a restart leaves no junk and never re-imports a half-album."""
+    from pathlib import Path
+
+    class _S:
+        staging_root = str(tmp_path / "data" / "downloads" / "soulseek")
+
+    _seed(conn, "80", "downloading")
+    item_id = repo.get_gap(conn, "lidarr", "80")["id"]
+    leftover = Path(_S.staging_root) / "Queen - The Miracle"
+    leftover.mkdir(parents=True, exist_ok=True)
+    (leftover / "01 - orphaned.flac").write_text("junk")
+    repo.record_staged_file(conn, item_id, str(leftover))
+    conn.commit()
+
+    adapter = FakeAdapter(results={"80": False})   # still wanted -> reset to pending
+    reconcile.reconcile_on_startup(conn, threading.Lock(), _build_adapters_factory(adapter), _S())
+
+    assert _status_of(conn, "80") == "pending"
+    assert not leftover.exists(), "the abandoned download's staging dir must be purged on reset"
+
+
+def test_clear_orphaned_downloads_noop_when_disabled():
+    """With acq_clear_downloads_on_start False, the sweep returns 0 and never builds a client."""
+    class _Off:
+        acq_clear_downloads_on_start = False
+
+    assert reconcile.clear_orphaned_downloads_on_start(_Off()) == 0
+
+
+def test_clear_orphaned_downloads_sweeps_and_closes_client(monkeypatch):
+    """The sweep builds a slskd client, calls clear_all_downloads, and closes the client (CR-02)."""
+    class _FakeSlskd:
+        def clear_all_downloads(self):
+            return 5
+
+    class _Client:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    client = _Client()
+    monkeypatch.setattr("core.acquire.build_acquire_clients", lambda settings: (_FakeSlskd(), [client]))
+
+    class _On:
+        acq_clear_downloads_on_start = True
+
+    n = reconcile.clear_orphaned_downloads_on_start(_On())
+    assert n == 5
+    assert client.closed is True   # CR-02: caller-owns-close
+
+
+def test_clear_orphaned_downloads_swallows_infra_fault(monkeypatch):
+    """slskd unreachable this boot -> the sweep is skipped (returns 0), never blocks startup."""
+    class _DownSlskd:
+        def clear_all_downloads(self):
+            raise RuntimeError("slskd unreachable")
+
+    class _Client:
+        def close(self):
+            pass
+
+    monkeypatch.setattr("core.acquire.build_acquire_clients", lambda settings: (_DownSlskd(), [_Client()]))
+
+    class _On:
+        acq_clear_downloads_on_start = True
+
+    assert reconcile.clear_orphaned_downloads_on_start(_On()) == 0
