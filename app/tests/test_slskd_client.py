@@ -572,3 +572,13 @@ def test_real_4xx_is_not_retried():
     with pytest.raises(httpx.HTTPStatusError):
         client.search_state("missing")
     assert calls["n"] == 1
+
+
+def test_send_retries_429_rate_limit_then_succeeds():
+    """A 429 (slskd/Soulseek search rate-limit under MAX_CONCURRENT) is retried, not failed."""
+    client, calls = _counting_client([
+        lambda r: httpx.Response(429, json={"error": "too many requests"}),
+        lambda r: httpx.Response(200, json={"id": "search-rl"}),
+    ])
+    assert client.search("Queen The Miracle") == "search-rl"
+    assert calls["n"] == 2

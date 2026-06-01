@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 # connection for ~1-2s when gluetun's status poll times out): a brief bounded retry rides it out so a
 # flap no longer 409s a search, connection-resets the shares check, or aborts a whole cycle. Real 4xx
 # (400/404) are NOT here — they surface to the caller unchanged.
-_RETRYABLE_STATUS = frozenset({502, 503, 504})
+_RETRYABLE_STATUS = frozenset({429, 502, 503, 504})  # 429 = slskd/Soulseek search rate-limit under MAX_CONCURRENT
 
 
 @dataclass(frozen=True)
