@@ -432,12 +432,22 @@ def test_cancel_transfer_resolves_real_ids_and_deletes_each():
 # --- hard-fault posture (slskd is the new primary download path) --------------------------------
 
 def test_search_raises_on_5xx():
-    """slskd is the primary download path — a 5xx surfaces (raise_for_status), not swallowed."""
+    """slskd is the primary download path — a hard 5xx surfaces (raise_for_status), not swallowed.
+    Uses 500 (not the transient 502/503/504 family) so it proves the surface WITHOUT the retry delay;
+    the transient-status retry is covered by the _send retry tests below."""
     client, _ = _client_for(
-        [(lambda r: True, lambda r: httpx.Response(503, json={"error": "down"}))],
+        [(lambda r: True, lambda r: httpx.Response(500, json={"error": "down"}))],
     )
     with pytest.raises(httpx.HTTPStatusError):
         client.search("x")
+
+
+def test_persistent_503_surfaces_after_retries_exhausted():
+    """A transient 502/503/504 IS retried, but if it never clears the final response still surfaces."""
+    client, calls = _counting_client([lambda r: httpx.Response(503, json={"error": "down"})], max_retries=2)
+    with pytest.raises(httpx.HTTPStatusError):
+        client.search("x")
+    assert calls["n"] == 3   # initial + 2 retries, then the 503 surfaces
 
 
 def test_every_method_carries_api_key_header():
@@ -457,3 +467,72 @@ def test_every_method_carries_api_key_header():
     for rec in recorder:
         assert rec["headers"].get("x-api-key") == "secret-key"
         assert "/api/v0/" in rec["path"]
+
+
+# --- bounded retry through the slskd<->gluetun VPN reconnect window ------------------------------
+# The flap drops slskd's Soulseek connection for ~1-2s; during it, a search submit 409s and a
+# poll/shares GET connection-resets (Errno 104). _send rides it out with a short bounded retry so a
+# transient flap no longer fails an item or aborts a whole cycle. Real 4xx still surface unchanged.
+
+def _counting_client(script, *, backoff_base=0.0, max_retries=3):
+    """Build a client whose Nth call runs script[N] (a request->Response fn that may raise). Returns
+    (client, calls) where calls['n'] is the attempt count. backoff_base=0 -> no real sleep in tests."""
+    calls = {"n": 0}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        i = calls["n"]
+        calls["n"] += 1
+        return script[min(i, len(script) - 1)](request)
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-slskd")
+    return (
+        SlskdClient("http://test-slskd", "k", client, backoff_base=backoff_base, max_retries=max_retries),
+        calls,
+    )
+
+
+def _raise_reset(_r):
+    raise httpx.ReadError("[Errno 104] Connection reset by peer")
+
+
+def test_send_retries_transport_reset_then_succeeds():
+    """A connection-reset (the flap signature on a poll/shares GET) is retried, not raised."""
+    client, calls = _counting_client([_raise_reset, lambda r: httpx.Response(200, json={"isComplete": True})])
+    assert client.search_state("s1") == {"isComplete": True}
+    assert calls["n"] == 2   # one reset + one success
+
+
+def test_send_retries_flap_409_on_search_submit_then_succeeds():
+    """The VPN-flap 409 on POST /searches is retried through the reconnect (search not failed)."""
+    client, calls = _counting_client([
+        lambda r: httpx.Response(409, json={"error": "conflict"}),
+        lambda r: httpx.Response(200, json={"id": "search-9"}),
+    ])
+    assert client.search("Queen A Night at the Opera") == "search-9"
+    assert calls["n"] == 2
+
+
+def test_enqueue_is_not_retried_on_transport_error():
+    """enqueue is non-idempotent (retry=False): a transport fault surfaces immediately, never a
+    second POST that could double-enqueue the download."""
+    client, calls = _counting_client([_raise_reset, lambda r: httpx.Response(201)])
+    with pytest.raises(httpx.TransportError):
+        client.enqueue("winterwulf", [{"filename": "f", "size": 1}])
+    assert calls["n"] == 1   # no retry
+
+
+def test_send_gives_up_and_raises_after_max_retries():
+    """A persistent transport fault still surfaces after the bounded retries are exhausted."""
+    client, calls = _counting_client([_raise_reset], max_retries=3)
+    with pytest.raises(httpx.TransportError):
+        client.search_state("s")
+    assert calls["n"] == 4   # initial attempt + 3 retries
+
+
+def test_real_4xx_is_not_retried():
+    """A genuine 404/400 must surface to the caller on the FIRST response (not retried as transient)."""
+    client, calls = _counting_client([lambda r: httpx.Response(404, json={})])
+    # search_state raises on the 404 via raise_for_status; the point is it did NOT retry.
+    with pytest.raises(httpx.HTTPStatusError):
+        client.search_state("missing")
+    assert calls["n"] == 1

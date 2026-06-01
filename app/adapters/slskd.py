@@ -21,12 +21,19 @@
 # The injected httpx.Client makes the whole surface offline-provable with httpx.MockTransport /
 # respx (no live slskd) — see tests/test_slskd_client.py.
 import logging
+import time
 from dataclasses import dataclass
 from typing import Optional
 
 import httpx
 
 log = logging.getLogger(__name__)
+
+# Transient HTTP statuses the slskd<->gluetun VPN reconnect window produces (slskd drops the Soulseek
+# connection for ~1-2s when gluetun's status poll times out): a brief bounded retry rides it out so a
+# flap no longer 409s a search, connection-resets the shares check, or aborts a whole cycle. Real 4xx
+# (400/404) are NOT here — they surface to the caller unchanged.
+_RETRYABLE_STATUS = frozenset({502, 503, 504})
 
 
 @dataclass(frozen=True)
@@ -127,12 +134,54 @@ class SlskdClient:
 
     app = "slskd"
 
-    def __init__(self, base_url: str, api_key: str, client: httpx.Client):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        client: httpx.Client,
+        *,
+        max_retries: int = 3,
+        backoff_base: float = 0.5,
+    ):
         if not api_key:
             raise ValueError("SLSKD_API_KEY is required (slskd is the primary download path)")
         self._base = base_url.rstrip("/") + "/api/v0"
         self._client = client
         self._headers = {"X-API-Key": api_key}   # slskd auth header: CAPITAL API (not Servarr's X-Api-Key)
+        self._max_retries = max_retries
+        self._backoff_base = backoff_base         # 0 in tests to skip the sleep
+
+    def _send(self, method: str, url: str, *, retry: bool = True, retry_status=(), **kwargs):
+        """Issue one slskd request, riding out the VPN-reconnect window with a bounded retry.
+
+        Retries (up to max_retries, exponential backoff from backoff_base) on a transport-level fault
+        (connection reset / read-timeout / connect-error — the flap signature) and on a transient
+        status (502/503/504, plus any caller-named `retry_status` such as the flap-induced 409 on a
+        search submit). A normal HTTP response (incl. real 4xx like 400/404) is returned to the caller
+        UNCHANGED — the per-method raise_for_status / status checks below are untouched. `retry=False`
+        (the enqueue POST) disables transport retry so a non-idempotent submit is never duplicated."""
+        attempt = 0
+        while True:
+            try:
+                r = self._client.request(method, url, headers=self._headers, **kwargs)
+            except httpx.TransportError:
+                if not retry or attempt >= self._max_retries:
+                    raise
+                self._backoff(attempt)
+                attempt += 1
+                continue
+            if (
+                attempt < self._max_retries
+                and (r.status_code in _RETRYABLE_STATUS or r.status_code in retry_status)
+            ):
+                self._backoff(attempt)
+                attempt += 1
+                continue
+            return r
+
+    def _backoff(self, attempt: int) -> None:
+        if self._backoff_base:
+            time.sleep(self._backoff_base * (2 ** attempt))
 
     # --- search ---------------------------------------------------------------------------------
 
@@ -142,11 +191,12 @@ class SlskdClient:
         A response missing `id` yields None rather than a KeyError — the caller (04-04) treats a
         None search id as a failed submit and surfaces/retries it.
         """
-        r = self._client.post(
+        r = self._send(
+            "POST",
             f"{self._base}/searches",
-            headers=self._headers,
             json={"searchText": text},
             timeout=30.0,
+            retry_status=(409,),   # the VPN-flap 409 on submit: retry through the reconnect, don't fail the item
         )
         r.raise_for_status()
         body = r.json()
@@ -156,11 +206,7 @@ class SlskdClient:
 
     def search_state(self, search_id: str) -> dict:
         """GET /searches/{id}; return the state dict (isComplete/responseCount/fileCount readable)."""
-        r = self._client.get(
-            f"{self._base}/searches/{search_id}",
-            headers=self._headers,
-            timeout=30.0,
-        )
+        r = self._send("GET", f"{self._base}/searches/{search_id}", timeout=30.0)
         r.raise_for_status()
         body = r.json()
         return body if isinstance(body, dict) else {}
@@ -183,11 +229,7 @@ class SlskdClient:
         (same album/artist, or the same stuck item re-searched) does not 409. A 404 (already gone) is
         fine; the caller wraps this in a best-effort try/except so a cleanup hiccup never breaks
         acquisition."""
-        r = self._client.delete(
-            f"{self._base}/searches/{search_id}",
-            headers=self._headers,
-            timeout=30.0,
-        )
+        r = self._send("DELETE", f"{self._base}/searches/{search_id}", timeout=30.0)
         if r.status_code == 404:
             return  # already absent — nothing to clean up
         r.raise_for_status()
@@ -198,11 +240,7 @@ class SlskdClient:
         A non-list body (malformed/unexpected) degrades to [] (T-04-06) so one bad response can
         never crash the collection window in 04-04.
         """
-        r = self._client.get(
-            f"{self._base}/searches/{search_id}/responses",
-            headers=self._headers,
-            timeout=30.0,
-        )
+        r = self._send("GET", f"{self._base}/searches/{search_id}/responses", timeout=30.0)
         r.raise_for_status()
         body = r.json()
         return body if isinstance(body, list) else []
@@ -215,11 +253,14 @@ class SlskdClient:
         `files` is the list of {filename, size} dicts the caller selected (the gate-chosen
         candidate's files). slskd is primary: a non-2xx surfaces via raise_for_status.
         """
-        r = self._client.post(
+        # retry=False: enqueue is non-idempotent — a transport fault must not risk a double-enqueue
+        # (the item simply error-skips and retries next cycle, with no duplicate download).
+        r = self._send(
+            "POST",
             f"{self._base}/transfers/downloads/{username}",
-            headers=self._headers,
             json=files,
             timeout=30.0,
+            retry=False,
         )
         r.raise_for_status()
 
@@ -229,11 +270,7 @@ class SlskdClient:
         `state` + `bytesTransferred` are read by the caller via .get() (absent → None, never a
         KeyError) so the 04-04 stall watch interprets progress defensively (T-04-06).
         """
-        r = self._client.get(
-            f"{self._base}/transfers/downloads/{username}/{transfer_id}",
-            headers=self._headers,
-            timeout=30.0,
-        )
+        r = self._send("GET", f"{self._base}/transfers/downloads/{username}/{transfer_id}", timeout=30.0)
         r.raise_for_status()
         body = r.json()
         return body if isinstance(body, dict) else {}
@@ -273,9 +310,7 @@ class SlskdClient:
         slskd lists a user's in-flight + completed transfers here; _matching_files walks it for OUR
         enqueued files. A 404 (the user has no downloads yet) degrades to an empty payload (no files)
         rather than raising — right after enqueue the list may not be populated for a beat."""
-        r = self._client.get(
-            f"{self._base}/transfers/downloads/{username}", headers=self._headers, timeout=30.0
-        )
+        r = self._send("GET", f"{self._base}/transfers/downloads/{username}", timeout=30.0)
         if r.status_code == 404:
             return {}
         r.raise_for_status()
@@ -351,9 +386,9 @@ class SlskdClient:
         remove=true tells slskd to also drop the partial from its own download list; the caller
         (04-04) owns the staging-dir purge separately via core.staging.
         """
-        r = self._client.delete(
+        r = self._send(
+            "DELETE",
             f"{self._base}/transfers/downloads/{username}/{transfer_id}",
-            headers=self._headers,
             params={"remove": "true" if remove else "false"},
             timeout=30.0,
         )
@@ -379,7 +414,7 @@ class SlskdClient:
         shares or a non-int files reads as 0 — T-05-06, a malformed response never crashes). slskd
         is primary, so a transport/HTTP fault surfaces (raise_for_status) for the caller to classify
         as infra (REL-02). The `shares`/`files` wire keys stay in this method (the firewall)."""
-        r = self._client.get(f"{self._base}/application", headers=self._headers, timeout=30.0)
+        r = self._send("GET", f"{self._base}/application", timeout=30.0)
         r.raise_for_status()
         body = r.json()
         if not isinstance(body, dict):
@@ -398,7 +433,7 @@ class SlskdClient:
         primary). The rescan is async in slskd (the PUT returns immediately and the scan runs in the
         background), so the ensure/self-heal cycle (05-03) re-checks the count on a LATER cycle
         (eventually-consistent, Pitfall 6)."""
-        r = self._client.put(f"{self._base}/shares", headers=self._headers, timeout=30.0)
+        r = self._send("PUT", f"{self._base}/shares", timeout=30.0)
         if r.status_code == 409:
             return False
         r.raise_for_status()
