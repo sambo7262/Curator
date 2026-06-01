@@ -123,7 +123,7 @@ class FakeSlskd:
         # dir slskd actually lands the files in under staging_root (no batchId/username subdir).
         return TransferHandle(
             username=candidate.username,
-            transfer_id=candidate.username,
+            filenames=tuple(f.filename for f in candidate.files if f.filename),
             landing_dir_name=_remote_folder_leaf(candidate.folder),
         )
 
@@ -136,7 +136,7 @@ class FakeSlskd:
         return item
 
     def cancel_transfer(self, handle, remove=True):
-        self.cancelled.append((handle.username, handle.transfer_id))
+        self.cancelled.append((handle.username, handle.filenames))
 
 
 class FakeAdapter:

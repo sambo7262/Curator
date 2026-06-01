@@ -41,10 +41,15 @@ class TransferHandle:
     uses ONLY the last path segment of the peer's remote folder (peer `music\\ZHU\\BLACK MIDAS (2026)`
     -> local `<downloads_root>/BLACK MIDAS (2026)/`), flat, with no `<username>/` or `<batchId>/`
     subdir. acquire reads this neutral string (NOT the wire `folder` key) to resolve the real import
-    source + purge/quarantine target. It is a plain dir name, not *arr/slskd wire vocabulary."""
+    source + purge/quarantine target. It is a plain dir name, not *arr/slskd wire vocabulary.
+
+    `filenames` is the tuple of enqueued file paths. slskd does NOT address a download by username
+    (the prior `transfer_id=username` assumption 400'd live on 2026-05-31): each file gets its own
+    GUID id, so progress/cancel are resolved by reading the per-user downloads list and matching OUR
+    files by name. The client reads these wire keys; acquire only ever holds the handle as a token."""
 
     username: str
-    transfer_id: str
+    filenames: tuple = ()
     landing_dir_name: str = ""
 
 
@@ -58,6 +63,31 @@ def _remote_folder_leaf(remote_dir: str) -> str:
         return ""
     leaf = remote_dir.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
     return leaf.strip()
+
+
+def _basename(path: str) -> str:
+    """Last path segment of a slskd file path (splits on BOTH `\\` and `/`); "" on non-str."""
+    if not isinstance(path, str):
+        return ""
+    return path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].strip()
+
+
+def _iter_file_records(node):
+    """Recursively yield every dict carrying a 'filename' key out of a slskd downloads payload.
+
+    slskd's GET /transfers/downloads/{username} nests per-file records under user/directory wrappers
+    (`{username, directories:[{files:[{id, filename, state, bytesTransferred, size}]}]}`), but the
+    exact nesting is an [ASSUMED] shape until live-verified. Walking the JSON for any dict with a
+    'filename' key makes progress/cancel robust to whichever wrapper shape (dict-of-user, bare list,
+    or directories nesting) slskd actually returns — one bad/odd level can never hide our files."""
+    if isinstance(node, dict):
+        if "filename" in node:
+            yield node
+        for v in node.values():
+            yield from _iter_file_records(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _iter_file_records(v)
 
 # --- Transfer terminal-state substrings (A3 — PINNED LIVE 2026-05-31, see 04-05-LIVE-PROBE.md) ---
 # slskd reports a transfer's lifecycle as a compound flag `state` string "<phase>, <completion>".
@@ -229,12 +259,42 @@ class SlskdClient:
             first = files[0].filename or ""
             parent = first.replace("\\", "/").rstrip("/").rsplit("/", 1)
             leaf = _remote_folder_leaf(parent[0]) if len(parent) > 1 else ""
-        # slskd keys downloads by username; the handle carries it opaquely for the watch/cancel calls.
+        # The handle carries the enqueued filenames so progress/cancel can find OUR files in slskd's
+        # per-user downloads list (slskd has no username-keyed transfer; each file gets its own id).
         return TransferHandle(
             username=candidate.username,
-            transfer_id=candidate.username,
+            filenames=tuple(f.filename for f in files if f.filename),
             landing_dir_name=leaf,
         )
+
+    def _user_downloads(self, username: str) -> object:
+        """GET /transfers/downloads/{username} -> the raw downloads payload for that user (404 -> {}).
+
+        slskd lists a user's in-flight + completed transfers here; _matching_files walks it for OUR
+        enqueued files. A 404 (the user has no downloads yet) degrades to an empty payload (no files)
+        rather than raising — right after enqueue the list may not be populated for a beat."""
+        r = self._client.get(
+            f"{self._base}/transfers/downloads/{username}", headers=self._headers, timeout=30.0
+        )
+        if r.status_code == 404:
+            return {}
+        r.raise_for_status()
+        return r.json()
+
+    def _matching_files(self, handle: "TransferHandle") -> list:
+        """The slskd file records for THIS handle's enqueued files (matched by full name or basename).
+
+        Matching tolerates path-separator / prefix drift between what we enqueued and what slskd echoes
+        by also comparing basenames — a name mismatch must never silently hide a real transfer (which
+        would look like a permanent stall)."""
+        wanted = set(handle.filenames)
+        wanted_base = {_basename(f) for f in handle.filenames}
+        out = []
+        for rec in _iter_file_records(self._user_downloads(handle.username)):
+            name = rec.get("filename")
+            if name in wanted or _basename(name) in wanted_base:
+                out.append(rec)
+        return out
 
     def transfer_progress(self, handle: "TransferHandle"):
         """NEUTRAL progress seam over transfer(): return acquire.TransferProgress(terminal, bytes_done).
@@ -250,27 +310,40 @@ class SlskdClient:
         """
         from core.acquire import TransferProgress
 
-        t = self.transfer(handle.username, handle.transfer_id)
-        state = t.get("state") or ""
-        bytes_done = t.get("bytesTransferred") or 0
-        # A3 robust rule: a transfer is TERMINAL only once its state contains "Completed"; then the
-        # completion half disambiguates success vs failure. "Succeeded" => success; any other
-        # terminal ("Completed, Errored"/"Cancelled"/...) => failure. Anything without "Completed"
-        # (e.g. "InProgress", "Queued", "Initializing") is still running -> terminal None.
-        terminal = None
-        if TERMINAL_PHASE_SUBSTRING in state:
-            if any(s in state for s in TERMINAL_SUCCESS_SUBSTRINGS):
-                terminal = "success"
-            else:
-                # Any terminal completion that is NOT a success is a failure (fall to next candidate),
-                # whether or not it matches a named failure substring (the family is open-ended).
-                terminal = "failure"
+        files = self._matching_files(handle)
+        if not files:
+            # Not listed yet (just enqueued) or already cleared — no progress this poll, not terminal.
+            return TransferProgress(terminal=None, bytes_done=0)
+
+        states = [(rec.get("state") or "") for rec in files]
+        bytes_done = sum((rec.get("bytesTransferred") or 0) for rec in files)
+
+        def _is_terminal(s: str) -> bool:
+            return TERMINAL_PHASE_SUBSTRING in s
+
+        def _is_success(s: str) -> bool:
+            return any(sub in s for sub in TERMINAL_SUCCESS_SUBSTRINGS)
+
+        # A3 robust rule, aggregated across the album's files: a transfer is TERMINAL once its state
+        # contains "Completed"; "Succeeded" => success, any other terminal => failure. ANY failed file
+        # fails the whole grab (fall to the next candidate); success requires ALL files completed-
+        # succeeded; otherwise some are still running -> terminal None (keep watching).
+        if any(_is_terminal(s) and not _is_success(s) for s in states):
+            terminal = "failure"
+        elif all(_is_terminal(s) and _is_success(s) for s in states):
+            terminal = "success"
+        else:
+            terminal = None
         return TransferProgress(terminal=terminal, bytes_done=bytes_done)
 
     def cancel_transfer(self, handle: "TransferHandle", remove: bool = True) -> None:
-        """NEUTRAL cancel seam: cancel the transfer addressed by the opaque handle (remove=True drops
-        the partial from slskd's own list). acquire calls THIS (never naming a username)."""
-        self.cancel(handle.username, handle.transfer_id, remove=remove)
+        """NEUTRAL cancel seam: cancel every file of the transfer addressed by the opaque handle
+        (remove=True drops the partials from slskd's own list). acquire calls THIS (never naming a
+        username). Resolves each file's real slskd id from the per-user list, then DELETEs by id."""
+        for rec in self._matching_files(handle):
+            tid = rec.get("id")
+            if tid:
+                self.cancel(handle.username, tid, remove=remove)
 
     def cancel(self, username: str, transfer_id: str, remove: bool = True) -> None:
         """DELETE /transfers/downloads/{username}/{id}?remove={bool}; cancel (and optionally remove).

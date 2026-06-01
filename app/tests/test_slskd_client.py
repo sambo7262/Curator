@@ -20,7 +20,7 @@ import json
 import httpx
 import pytest
 
-from adapters.slskd import SlskdClient
+from adapters.slskd import SlskdClient, TransferHandle
 
 
 def _record_client(recorder, responses):
@@ -321,6 +321,9 @@ def test_enqueue_candidate_handle_carries_remote_folder_leaf():
     handle = client.enqueue_candidate(cand)
     assert handle.landing_dir_name == "BLACK MIDAS (2026)"
     assert handle.username == "zhuseed"
+    # the handle carries the enqueued filenames so progress/cancel can find OUR files (slskd has no
+    # username-keyed transfer — addressing by username/username 400'd live, 2026-05-31).
+    assert handle.filenames == ("music\\ZHU\\BLACK MIDAS (2026)\\01 - Intro.flac",)
 
 
 def test_enqueue_candidate_leaf_falls_back_to_file_dir_when_folder_empty():
@@ -337,6 +340,93 @@ def test_enqueue_candidate_leaf_falls_back_to_file_dir_when_folder_empty():
     )
     handle = client.enqueue_candidate(cand)
     assert handle.landing_dir_name == "BLACK MIDAS (2026)"
+
+
+# --- transfer_progress / cancel_transfer via the per-user downloads list ------------------------
+# REGRESSION (2026-05-31): the handle used to address transfers by username/username, so the progress
+# GET hit /transfers/downloads/{user}/{user} -> 400 and EVERY accepted download died. slskd keys each
+# file by its own id; progress/cancel now read the per-user list and match OUR files by name.
+
+_F1 = "music\\Queen\\A Night at the Opera\\01 - Death on Two Legs.flac"
+_F2 = "music\\Queen\\A Night at the Opera\\02 - Lazing on a Sunday Afternoon.flac"
+
+
+def _downloads_body(files):
+    """The slskd GET /transfers/downloads/{username} shape: user -> directories -> files."""
+    return {
+        "username": "winterwulf",
+        "directories": [{"directory": "music\\Queen\\A Night at the Opera", "files": files}],
+    }
+
+
+def _progress_for(files):
+    body = _downloads_body(files)
+    client, rec = _client_for(
+        [(lambda r: r.method == "GET" and r.url.path.endswith("/transfers/downloads/winterwulf"),
+          lambda r: httpx.Response(200, json=body))],
+    )
+    handle = TransferHandle(username="winterwulf", filenames=(_F1, _F2))
+    return client.transfer_progress(handle), rec
+
+
+def test_transfer_progress_in_progress_sums_bytes_not_terminal():
+    """Some files still transferring -> terminal None, bytes_done = sum across OUR files."""
+    prog, _ = _progress_for([
+        {"id": "g1", "filename": _F1, "state": "InProgress", "bytesTransferred": 100, "size": 500},
+        {"id": "g2", "filename": _F2, "state": "Queued", "bytesTransferred": 0, "size": 400},
+    ])
+    assert prog.terminal is None
+    assert prog.bytes_done == 100
+
+
+def test_transfer_progress_success_only_when_all_completed_succeeded():
+    """ALL files 'Completed, Succeeded' -> success with the full byte total."""
+    prog, _ = _progress_for([
+        {"id": "g1", "filename": _F1, "state": "Completed, Succeeded", "bytesTransferred": 500, "size": 500},
+        {"id": "g2", "filename": _F2, "state": "Completed, Succeeded", "bytesTransferred": 400, "size": 400},
+    ])
+    assert prog.terminal == "success"
+    assert prog.bytes_done == 900
+
+
+def test_transfer_progress_any_failed_file_fails_the_grab():
+    """ANY terminal non-success file -> failure (fall to the next candidate)."""
+    prog, _ = _progress_for([
+        {"id": "g1", "filename": _F1, "state": "Completed, Succeeded", "bytesTransferred": 500, "size": 500},
+        {"id": "g2", "filename": _F2, "state": "Completed, Errored", "bytesTransferred": 12, "size": 400},
+    ])
+    assert prog.terminal == "failure"
+
+
+def test_transfer_progress_unlisted_is_no_progress_not_terminal():
+    """Right after enqueue the file may not be listed yet -> no progress, not terminal (keep watching)."""
+    prog, _ = _progress_for([
+        {"id": "z", "filename": "music\\Someone Else\\unrelated.flac", "state": "InProgress", "bytesTransferred": 9},
+    ])
+    assert prog.terminal is None
+    assert prog.bytes_done == 0
+
+
+def test_cancel_transfer_resolves_real_ids_and_deletes_each():
+    """cancel_transfer reads the per-user list, resolves each file's real id, and DELETEs by id
+    (never username/username). Matches by basename too (path/prefix drift tolerant)."""
+    body = _downloads_body([
+        {"id": "guid-1", "filename": _F1, "state": "InProgress", "bytesTransferred": 100},
+        {"id": "guid-2", "filename": _F2, "state": "InProgress", "bytesTransferred": 50},
+    ])
+    recorder = []
+    client, rec = _client_for(
+        [
+            (lambda r: r.method == "GET" and r.url.path.endswith("/transfers/downloads/winterwulf"),
+             lambda r: httpx.Response(200, json=body)),
+            (lambda r: r.method == "DELETE", lambda r: httpx.Response(204)),
+        ],
+        recorder=recorder,
+    )
+    client.cancel_transfer(TransferHandle(username="winterwulf", filenames=(_F1, _F2)))
+    deletes = [e for e in rec if e["method"] == "DELETE"]
+    assert {e["path"].rsplit("/", 1)[-1] for e in deletes} == {"guid-1", "guid-2"}
+    assert all(e["params"].get("remove") == "true" for e in deletes)
 
 
 # --- hard-fault posture (slskd is the new primary download path) --------------------------------
