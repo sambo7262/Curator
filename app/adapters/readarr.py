@@ -317,6 +317,12 @@ class ReadarrAdapter:
             log.warning("readarr verify_imported degraded -> False (forces quarantine): %s", e)
             return False
 
+    def imported_track_count(self, item: GapItem) -> int:
+        """BEST-EFFORT: partial album completion is a MUSIC concept (Lidarr). A book is single-file, so
+        there is no meaningful partial — always return 0 so the core's partial branch never fires for a
+        book (an unincreased baseline => the old binary verify/quarantine path, unchanged for Readarr)."""
+        return 0
+
     # === Phase 5: the D-02 Usenet-race check (GAP-03) — BEST-EFFORT (ARR-02) =======================
     # Mirrors Lidarr's get_queue_status but, like every Readarr method, swallows ANY fault to a safe
     # default. The SAFE default here is False ("no active grab known") so a Readarr outage degrades to

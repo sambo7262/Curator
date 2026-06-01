@@ -19,6 +19,9 @@ _SCHEMA_0002 = (Path(__file__).parent / "migration_0002.sql").read_text(encoding
 # Migration 0003 (Phase 5): add attempt_count/next_attempt_at/last_checked_at + the
 # 'permanently-unavailable' status (backoff + dormant re-check, D-07/D-08/D-09).
 _SCHEMA_0003 = (Path(__file__).parent / "migration_0003.sql").read_text(encoding="utf-8")
+# Migration 0004 (Phase 5): add the 'partial' status (partial album completion — import the good
+# tracks now, revisit on a cooldown for the still-missing ones; never quarantine real progress).
+_SCHEMA_0004 = (Path(__file__).parent / "migration_0004.sql").read_text(encoding="utf-8")
 
 # Ordered list of (version-label, sql). The 1-based index IS the user_version a migration
 # bumps to; append new tuples here for later phases — never reorder or mutate shipped ones.
@@ -26,6 +29,7 @@ MIGRATIONS: List[Tuple[str, str]] = [
     ("0001", _SCHEMA_0001),
     ("0002", _SCHEMA_0002),   # Phase 4: acquisition lifecycle states + staged_files table
     ("0003", _SCHEMA_0003),   # Phase 5: backoff/attempt/last-checked cols + permanently-unavailable
+    ("0004", _SCHEMA_0004),   # Phase 5: 'partial' status (partial album completion)
 ]
 
 

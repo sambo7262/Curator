@@ -152,6 +152,7 @@ class FakeAdapter:
         candidates_subset=None,
         verify_result=True,
         import_raises=False,
+        track_counts=None,
     ):
         self.app = app
         self._manifest = manifest if manifest is not None else Manifest(
@@ -165,6 +166,10 @@ class FakeAdapter:
         ]
         self._verify_result = verify_result
         self._import_raises = import_raises
+        # imported_track_count() returns these in order (last repeats). Default None -> a stable 0 on
+        # every call, i.e. no increase -> the partial branch never fires (existing tests unaffected).
+        self._track_counts = list(track_counts) if track_counts is not None else None
+        self._track_count_calls = 0
         self.executed = []          # decisions passed to execute_import
         self.manifest_calls = 0
 
@@ -185,6 +190,13 @@ class FakeAdapter:
 
     def verify_imported(self, item):
         return self._verify_result
+
+    def imported_track_count(self, item):
+        if self._track_counts is None:
+            return 0
+        val = self._track_counts[min(self._track_count_calls, len(self._track_counts) - 1)]
+        self._track_count_calls += 1
+        return val
 
 
 def _stub_gate(accept_folders):
@@ -648,6 +660,48 @@ def test_verify_false_quarantines(conn, settings):
     assert out == "quarantined"
     assert get_gap(conn, "lidarr", "42")["status"] == "quarantined"
     assert staging.exists() is False, "staging was MOVED to quarantine, not left in place"
+
+
+def test_partial_import_when_tracks_increase(conn, settings):
+    """Partial album completion: execute_import runs, the album STAYS wanted (verify False) BUT the
+    *arr's on-disk track count INCREASED (baseline 2 -> 5) -> 'partial', NOT quarantine. The good
+    tracks landed; staging is purged (no junk) and the item parks as 'partial' for a later revisit."""
+    item = _gap()
+    _seed(conn, item)
+    cand = _candidate(folder="Theta", username="seed")
+    slskd = _FakeSlskdCandidates([cand], progress_script={"seed": [_P(1, "success")]}, complete_after=0)
+    # album still wanted (a single/EP only filled some tracks) but trackFileCount went 2 -> 5.
+    adapter = FakeAdapter(verify_result=False, track_counts=[2, 5])
+
+    staging = Path(settings.staging_root) / "Theta"
+    staging.mkdir(parents=True, exist_ok=True)
+
+    out = acquire.acquire_item(
+        item, adapter, slskd, conn, settings, now=FakeClock(), gate_evaluate=_stub_gate({"Theta"})
+    )
+    assert out == "partial", "real tracks landed on an incomplete album = partial, not quarantine"
+    assert get_gap(conn, "lidarr", "42")["status"] == "partial"
+    assert not staging.exists(), "a partial import still purges staging (the matched files were moved out)"
+
+
+def test_partial_no_increase_still_quarantines(conn, settings):
+    """The partial branch is gated on a REAL increase: verify False AND the track count did NOT move
+    (baseline 3 -> 3, e.g. Lidarr rejected every file) -> quarantine, exactly as before. No false
+    'partial' when nothing actually imported."""
+    item = _gap()
+    _seed(conn, item)
+    cand = _candidate(folder="Iota", username="seed")
+    slskd = _FakeSlskdCandidates([cand], progress_script={"seed": [_P(1, "success")]}, complete_after=0)
+    adapter = FakeAdapter(verify_result=False, track_counts=[3, 3])
+
+    staging = Path(settings.staging_root) / "Iota"
+    staging.mkdir(parents=True, exist_ok=True)
+
+    out = acquire.acquire_item(
+        item, adapter, slskd, conn, settings, now=FakeClock(), gate_evaluate=_stub_gate({"Iota"})
+    )
+    assert out == "quarantined"
+    assert get_gap(conn, "lidarr", "42")["status"] == "quarantined"
 
 
 def test_import_raise_quarantines(conn, settings):

@@ -100,3 +100,12 @@ class ArrAdapter(Protocol):
         'imported' (D-03). Lidarr raises on fault; Readarr returns False (best-effort, false-negative
         forces quarantine, a false-positive would skip cleanup)."""
         ...
+
+    def imported_track_count(self, item: GapItem) -> int:
+        """Phase 5 (partial album completion) — NEUTRAL count of how many of this item's tracks the
+        *arr currently has ON DISK (Lidarr: statistics.trackFileCount). Read BEFORE import as a
+        baseline and AGAIN after: an increase means real tracks landed even if the album is still
+        incomplete (stays on the wanted list) — that is PROGRESS, not a quarantine. Lidarr raises on
+        fault (the caller degrades a raise to 'no baseline' and falls back to the binary verify);
+        Readarr returns 0 (books are single-file/best-effort — the partial branch never applies)."""
+        ...

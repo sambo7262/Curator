@@ -53,6 +53,7 @@ def _settings(**over):
         acq_grace_seconds=259200.0,
         acq_max_attempts=3,
         acq_dormant_seconds=2592000.0,
+        acq_partial_cooldown_seconds=604800.0,
     )
     base.update(over)
     return type("S", (), base)()
@@ -212,6 +213,22 @@ def test_apply_result_imported_resets_attempt():
     row = conn.execute("SELECT status, attempt_count FROM items WHERE arr_id='1'").fetchone()
     assert row["status"] == "imported"
     assert row["attempt_count"] == 0
+
+
+def test_apply_result_partial_parks_on_cooldown_no_burn():
+    """A 'partial' outcome (real tracks landed, album still incomplete) is PROGRESS, not a failure:
+    attempt_count resets to 0 (never marches toward permanently-unavailable) and next_attempt_at is
+    stamped with the long partial cooldown so the item revisits later for the missing tracks."""
+    conn = _conn()
+    _seed_item(conn, 1, status="partial", attempt_count=2)  # acquire_item already set status='partial'
+    lock = threading.Lock()
+    scheduler.apply_result(conn, lock, _item(arr_id="1"), "partial", _settings())
+    row = conn.execute(
+        "SELECT status, attempt_count, next_attempt_at FROM items WHERE arr_id='1'"
+    ).fetchone()
+    assert row["status"] == "partial"
+    assert row["attempt_count"] == 0, "partial must NOT burn an attempt (it's progress, not a fail)"
+    assert row["next_attempt_at"] is not None, "the revisit cooldown anchor must be set"
 
 
 def test_apply_result_one_fail_backs_off_1h():

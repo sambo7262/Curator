@@ -12,8 +12,10 @@ import sqlite3
 
 import pytest
 
-from state.db import connect, run_migrations
+from state.db import connect, run_migrations, MIGRATIONS
 from state.repo import get_gap, set_status
+
+_LATEST = len(MIGRATIONS)   # the user_version a full run_migrations reaches (tracks new migrations)
 
 
 def test_v0002_rows_survive_migration_to_v0003(seed_v0002_ledger):
@@ -30,7 +32,7 @@ def test_v0002_rows_survive_migration_to_v0003(seed_v0002_ledger):
 
     conn2 = connect(seed_v0002_ledger)
     run_migrations(conn2)
-    assert conn2.execute("PRAGMA user_version;").fetchone()[0] == 3
+    assert conn2.execute("PRAGMA user_version;").fetchone()[0] == _LATEST
     assert conn2.execute("SELECT COUNT(*) FROM items").fetchone()[0] == count_before
 
     # Identity + status + discovered_at preserved across the rebuild.
@@ -81,9 +83,9 @@ def test_migration_0003_idempotent(seed_v0002_ledger):
     """Re-running run_migrations on a v0003 DB applies nothing and leaves user_version=3."""
     conn = connect(seed_v0002_ledger)
     run_migrations(conn)
-    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == _LATEST
     run_migrations(conn)  # second call: no-op
-    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == _LATEST
     conn.close()
 
 
@@ -91,7 +93,7 @@ def test_fresh_db_migrates_all_the_way_to_v0003(tmp_db_path):
     """A brand-new DB (no prior version) migrates 0001 -> 0002 -> 0003 in order to user_version=3."""
     conn = connect(tmp_db_path)
     run_migrations(conn)
-    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == _LATEST
     # The new columns exist on a fresh DB too.
     cols = {r[1] for r in conn.execute("PRAGMA table_info(items)").fetchall()}
     assert {"attempt_count", "next_attempt_at", "last_checked_at"} <= cols

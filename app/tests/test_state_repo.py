@@ -13,7 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from state.db import connect, run_migrations
+from state.db import connect, run_migrations, MIGRATIONS
+
+_HEAD = len(MIGRATIONS)   # current migration head (tracks new migrations; was hardcoded 3)
 from state.repo import (
     upsert_gap, get_gap, set_status, list_by_status,
     record_staged_file, record_quarantine,
@@ -169,7 +171,7 @@ def test_migration_0002_bumps_user_version_to_2(tmp_db_path):
     """
     conn = connect(tmp_db_path)
     run_migrations(conn)
-    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == _HEAD
     # staged_files table now exists.
     assert conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='staged_files'"
@@ -215,7 +217,7 @@ def test_existing_rows_survive_the_items_rebuild(tmp_db_path):
     # Now reconnect with the FULL migration list — 0002 rebuilds items beneath the row.
     conn2 = connect(tmp_db_path)
     run_migrations(conn2)
-    assert conn2.execute("PRAGMA user_version;").fetchone()[0] == 3
+    assert conn2.execute("PRAGMA user_version;").fetchone()[0] == _HEAD
     assert conn2.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 1
     row = get_gap(conn2, "lidarr", "77")
     assert row is not None
@@ -242,9 +244,9 @@ def test_migration_0002_idempotent(tmp_db_path):
     """Re-running run_migrations on a current DB applies nothing and leaves user_version at head (3)."""
     conn = connect(tmp_db_path)
     run_migrations(conn)
-    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == _HEAD
     run_migrations(conn)  # second call: no-op
-    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == _HEAD
     conn.close()
 
 
@@ -408,7 +410,7 @@ def test_migration_0003_bumps_user_version_to_3(tmp_db_path):
     """A fresh DB migrates all the way to user_version 3 with the three new columns present."""
     conn = connect(tmp_db_path)
     run_migrations(conn)
-    assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version;").fetchone()[0] == _HEAD
     cols = {r[1] for r in conn.execute("PRAGMA table_info(items)").fetchall()}
     assert {"attempt_count", "next_attempt_at", "last_checked_at"} <= cols
     conn.close()
@@ -454,6 +456,28 @@ def test_select_eligible_grace_and_backoff(tmp_db_path):
 
     rows = select_eligible(conn, grace_cutoff, now, dormant_cutoff, 10)
     assert [r["arr_id"] for r in rows] == ["old"]
+    conn.close()
+
+
+def test_select_eligible_partial_revisits_after_cooldown(tmp_db_path):
+    """A 'partial' item (partial album completion) is retry-eligible like stuck/quarantined, but only
+    once its long revisit cooldown (next_attempt_at) has elapsed — before then it stays parked so the
+    same partial is not re-downloaded every cycle."""
+    conn = connect(tmp_db_path)
+    run_migrations(conn)
+    now = "2026-01-31T00:00:00Z"
+    grace_cutoff = "2026-01-28T00:00:00Z"
+    dormant_cutoff = "2026-01-01T00:00:00Z"
+
+    upsert_gap(conn, _gap(arr_id="cooled"))    # partial, cooldown elapsed -> eligible
+    upsert_gap(conn, _gap(arr_id="cooling"))   # partial, cooldown still in the future -> NOT eligible
+    conn.execute("UPDATE items SET status='partial', discovered_at=?, next_attempt_at=? WHERE arr_id=?",
+                 ("2020-01-01T00:00:00Z", "2026-01-15T00:00:00Z", "cooled"))
+    conn.execute("UPDATE items SET status='partial', discovered_at=?, next_attempt_at=? WHERE arr_id=?",
+                 ("2020-01-01T00:00:00Z", "2026-12-01T00:00:00Z", "cooling"))
+
+    rows = select_eligible(conn, grace_cutoff, now, dormant_cutoff, 10)
+    assert [r["arr_id"] for r in rows] == ["cooled"]
     conn.close()
 
 

@@ -420,6 +420,30 @@ class LidarrAdapter:
         still_wanted = {g.arr_id for g in self.get_wanted()}
         return item.arr_id not in still_wanted
 
+    def imported_track_count(self, item: "GapItem") -> int:
+        """Partial-completion baseline (Phase 5): how many of this album's tracks Lidarr has ON DISK
+        right now (`statistics.trackFileCount`). The caller reads this BEFORE the import and AGAIN
+        after; an increase = real tracks landed (progress) even when the album stays wanted because
+        only a single/EP/partial was available. The `statistics`/`trackFileCount` wire keys are read
+        HERE (the firewall) — only the neutral int crosses to core/acquire.py.
+
+        Re-queries the album by foreignAlbumId (same read get_manifest uses). Lidarr is primary ->
+        raise_for_status surfaces a hard fault, which the caller degrades to 'no baseline' (it then
+        falls back to the binary verify_imported, i.e. the pre-partial behavior)."""
+        r = self._client.get(
+            f"{self._base}/api/v1/album",
+            headers=self._headers,
+            params={"foreignAlbumId": item.foreign_id},
+            timeout=30.0,
+        )
+        r.raise_for_status()
+        body = r.json()
+        rec = body[0] if isinstance(body, list) and body else (body if isinstance(body, dict) else {})
+        stats = rec.get("statistics") if isinstance(rec, dict) else None
+        if not isinstance(stats, dict):
+            return 0
+        return int(stats.get("trackFileCount") or 0)
+
     # === Phase 5: the D-02 Usenet-race check (GAP-03) ==============================================
     # Fallback-only politeness: skip an item that already has an active/queued Usenet grab so Curator
     # never races the primary pipeline. The *arr `records`/`albumId` queue wire keys are read HERE

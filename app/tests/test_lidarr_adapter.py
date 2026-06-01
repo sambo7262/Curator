@@ -469,6 +469,37 @@ def test_verify_imported_false_when_item_still_present():
     assert adapter.verify_imported(_verify_item(arr_id="1")) is False
 
 
+def test_imported_track_count_reads_statistics_trackfilecount():
+    """Partial-completion baseline: imported_track_count returns statistics.trackFileCount (how many of
+    the album's tracks Lidarr has ON DISK) as a neutral int — the core diffs it across an import to tell
+    a real partial (count up) from a no-op (count flat)."""
+    album_json = [{
+        "title": "Spliff Odyssey", "artist": {"artistName": "Thievery Corporation"},
+        "statistics": {"trackFileCount": 2, "totalTrackCount": 12},
+    }]
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/v1/album"):
+            return httpx.Response(200, json=album_json)
+        return httpx.Response(404, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    adapter = LidarrAdapter("http://test-arr", "k", client)
+    assert adapter.imported_track_count(_verify_item(arr_id="1", foreign_id="m1")) == 2
+
+
+def test_imported_track_count_zero_without_statistics():
+    """No statistics block -> 0 (a safe baseline; the core's partial branch then simply never fires)."""
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/v1/album"):
+            return httpx.Response(200, json=[{"title": "A", "artist": {"artistName": "B"}}])
+        return httpx.Response(404, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler), base_url="http://test-arr")
+    adapter = LidarrAdapter("http://test-arr", "k", client)
+    assert adapter.imported_track_count(_verify_item()) == 0
+
+
 def test_import_methods_propagate_5xx_primary_posture():
     """Lidarr is primary: a 5xx on any import method surfaces (raise_for_status), never swallowed."""
     import pytest

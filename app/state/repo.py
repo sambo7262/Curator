@@ -190,11 +190,14 @@ def select_eligible(
 
     Two eligibility branches (GAP-03 grace + D-08 backoff + D-09 dormant re-check):
 
-    1. A retryable item (`pending`/`stuck`/`quarantined`) is eligible iff its grace window has
-       elapsed (`discovered_at <= grace_cutoff`, GAP-03 — the existing ~1493-row backlog is already
+    1. A retryable item (`pending`/`stuck`/`quarantined`/`partial`) is eligible iff its grace window
+       has elapsed (`discovered_at <= grace_cutoff`, GAP-03 — the existing ~1493-row backlog is already
        past grace at launch because the upsert never clobbers discovered_at) AND its backoff has
        elapsed (`next_attempt_at IS NULL OR next_attempt_at <= now`, D-08). `stuck` AND `quarantined`
-       ARE retry-eligible — that retry IS the backoff mechanism (OQ-2 resolved per D-08).
+       ARE retry-eligible — that retry IS the backoff mechanism (OQ-2 resolved per D-08). `partial`
+       (partial album completion) is likewise retry-eligible but on a much longer cooldown
+       (acq_partial_cooldown_seconds, stamped into next_attempt_at) so Curator revisits the album later
+       for its still-missing tracks WITHOUT re-downloading the same partial every cycle.
     2. A `permanently-unavailable` item re-enters the pool once its 30-day dormant TTL has elapsed
        (`last_checked_at IS NULL OR last_checked_at <= dormant_cutoff`, D-09) — a new uploader may
        have appeared.
@@ -211,7 +214,7 @@ def select_eligible(
         """
         SELECT * FROM items
         WHERE (
-            status IN ('pending', 'stuck', 'quarantined')
+            status IN ('pending', 'stuck', 'quarantined', 'partial')
             AND discovered_at <= ?
             AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
         ) OR (

@@ -212,7 +212,7 @@ def _watch_to_completion(slskd, handle, settings, now, poll_hook) -> str:
 
 def _import_and_verify(item, adapter, staging_path_str, staged_id, conn, settings) -> str:
     """On a completed transfer: ask the adapter for the importable subset (already filtered), then
-    import + verify + purge / quarantine. Returns "imported" | "quarantined".
+    import + verify + purge / quarantine. Returns "imported" | "partial" | "quarantined".
 
     Core consumes the adapter's list AS-IS (it never reads an *arr key): an empty list means nothing
     importable -> quarantine; a non-empty list is passed straight to execute_import. A primary import
@@ -235,26 +235,52 @@ def _import_and_verify(item, adapter, staging_path_str, staged_id, conn, setting
         log.info("%s: quarantined -> %s", _identity(item), reason)
         return "quarantined"
 
+    def _purge() -> None:
+        # D-05: a landed import (full OR partial) purges staging — the matched files were already moved
+        # out by importMode=move, so this only sweeps leftovers (no junk). A failed purge must NOT
+        # unmark a real import. Guarded by assert_under_root inside purge_staging.
+        try:
+            staging.purge_staging(staging_path_str, settings.staging_root)
+        except Exception as e:
+            log.warning("staging purge of %s hiccuped (ignored): %s", _identity(item), e)
+
     decisions = adapter.manual_import_candidates(staging_path_str)
     if not decisions:
         return _quarantine("no importable files in the completed download")
+
+    # Partial-completion baseline (Phase 5): how many of this album's tracks the *arr already has on
+    # disk BEFORE this import. A post-import increase = real tracks landed even if the album stays
+    # wanted (only a single/EP/partial was available). A read fault degrades to None -> we fall back to
+    # the binary verify below (the pre-partial behavior), never error-skipping a completed import.
+    baseline = _imported_track_count(adapter, item)
 
     try:
         adapter.execute_import(decisions)
     except Exception as e:
         return _quarantine(f"manual import failed: {e}")
 
-    if not adapter.verify_imported(item):
-        return _quarantine("import not confirmed by re-query (downloaded != imported)")
+    # Three-way verify (D-03 + partial album completion, owner policy 2026-05-31):
+    #   * album LEFT the wanted list            -> "imported" (fully satisfied)
+    #   * still wanted but track count INCREASED -> "partial"  (real tracks landed; revisit later for the rest)
+    #   * still wanted, no new track files       -> quarantine (the import genuinely did not land)
+    if adapter.verify_imported(item):
+        _purge()
+        repo.set_status(conn, item.arr_app, item.arr_id, "imported")
+        log.info("%s: imported %d file(s) -> library", _identity(item), len(decisions))
+        return "imported"
 
-    # D-05: verified import -> purge the staging dir (guarded by assert_under_root inside purge).
-    try:
-        staging.purge_staging(staging_path_str, settings.staging_root)
-    except Exception as e:  # a failed purge must not unmark a real import
-        log.warning("staging purge of %s hiccuped (ignored): %s", _identity(item), e)
-    repo.set_status(conn, item.arr_app, item.arr_id, "imported")
-    log.info("%s: imported %d file(s) -> library", _identity(item), len(decisions))
-    return "imported"
+    after = _imported_track_count(adapter, item)
+    if baseline is not None and after is not None and after > baseline:
+        # The good tracks landed but the album is incomplete — take them now (no quarantine), and the
+        # scheduler parks the item on a long cooldown so Curator revisits later for the missing tracks
+        # (a fuller source may appear) without re-downloading this same partial every cycle.
+        _purge()
+        repo.set_status(conn, item.arr_app, item.arr_id, "partial")
+        log.info("%s: partial import -> %d new track(s) landed; album still incomplete (revisit later for the rest)",
+                 _identity(item), after - baseline)
+        return "partial"
+
+    return _quarantine("import not confirmed by re-query (no new track files landed)")
 
 
 def _cleanup_abandoned(item, slskd, handle, staging_path_str, settings) -> None:
@@ -311,7 +337,7 @@ def acquire_item(
     poll_hook: Optional[Callable[[], None]] = None,
 ) -> str:
     """Compose the single-item acquisition loop (the Phase-4 verdict). Returns a neutral outcome
-    string: "imported" | "quarantined" | "stuck". Speaks ONLY neutral shapes (the firewall holds).
+    string: "imported" | "partial" | "quarantined" | "stuck". Speaks ONLY neutral shapes (firewall holds).
 
     Mirrors detect_gaps' single-composition-point shape (gap_detector 23-39). The clock + gate +
     candidate-builder + poll seams are injectable so the whole loop is offline-provable with fakes.
@@ -410,6 +436,19 @@ def acquire_item(
     log.info("%s: all accepted candidates exhausted -> stuck", _identity(item))
     repo.set_status(conn, item.arr_app, item.arr_id, "stuck")
     return "stuck"
+
+
+def _imported_track_count(adapter: ArrAdapter, item: GapItem) -> Optional[int]:
+    """The partial-completion baseline/after read, made fault-proof. Returns the adapter's neutral
+    on-disk track count, or None on ANY fault (incl. infra) — a count read failure must never turn a
+    completed import into an error-skip; the caller simply falls back to the binary verify. Readarr
+    returns 0 here by design, so its partial branch never fires (an unincreased baseline)."""
+    try:
+        return int(adapter.imported_track_count(item))
+    except Exception as e:
+        log.info("%s: track-count read failed (%s) -> no partial baseline (binary verify)",
+                 _identity(item), e)
+        return None
 
 
 def _safe_call(fn: Callable, arg) -> Any:

@@ -78,7 +78,7 @@ class LockedConn:
 
 def run_one(item: GapItem, adapter, slskd, conn, settings) -> str:
     """Resolve ONE eligible item to a neutral outcome string. Returns one of:
-      "imported" | "quarantined" | "stuck"   (a genuine acquire_item verdict)
+      "imported" | "partial" | "quarantined" | "stuck"   (a genuine acquire_item verdict)
       "skip-usenet-active"                    (an active/queued Usenet grab — D-02, no burn)
       "infra-skip"                            (an INFRA_EXC on the queue check OR during acquire — no burn)
       "dry-run"                               (ACQ_DRY_RUN — search/gate/log only, zero side effects, D-05)
@@ -115,6 +115,9 @@ def apply_result(conn, lock: threading.Lock, item: GapItem, outcome: str, settin
     """Persist the outcome of a run_one (the STATE-03 write side). All writes serialized on `lock`.
 
       "imported"                       -> set_status('imported'); attempt_count reset to 0.
+      "partial"                        -> attempt_count reset to 0; next_attempt_at = now + partial
+                                          cooldown; status 'partial' (progress, not a failure — revisit
+                                          later for the missing tracks, never permanently-unavailable).
       "quarantined" / "stuck"          -> attempt_count += 1, last_checked_at = now;
                                           if attempt_count >= acq_max_attempts -> status
                                           'permanently-unavailable', next_attempt_at = now + dormant;
@@ -138,6 +141,18 @@ def apply_result(conn, lock: threading.Lock, item: GapItem, outcome: str, settin
         # acquire_item already set status='imported' on the same conn; reset the attempt counter.
         with lock:
             repo.record_attempt(conn, item.arr_app, item.arr_id, 0, None, "imported")
+        return
+
+    if outcome == "partial":
+        # Partial album completion: real new tracks landed but the album is still incomplete. This is
+        # PROGRESS, not a failure — reset the attempt counter (never march a progressing item toward
+        # permanently-unavailable) and park it on the long partial cooldown so Curator revisits later
+        # for the missing tracks instead of re-downloading the same partial every cycle. acquire_item
+        # already set status='partial' on the same conn.
+        next_at = _iso(now + _dt.timedelta(seconds=settings.acq_partial_cooldown_seconds))
+        with lock:
+            repo.record_attempt(conn, item.arr_app, item.arr_id, 0, next_at, "partial")
+        log.info("%s: partial import -> revisit cooldown (next at %s)", _identity(item), next_at)
         return
 
     # Genuine fail: quarantined or stuck. Bump the attempt counter and set the backoff/terminal anchor.
