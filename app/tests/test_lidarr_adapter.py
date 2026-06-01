@@ -188,6 +188,29 @@ def test_get_quality_profile_returns_neutral_profile():
     assert prof.cutoff_rank == RANK_FLAC
 
 
+def test_get_quality_profile_recurses_into_quality_groups():
+    """REGRESSION (live: allowed=[] -> every candidate, FLAC included, rejected): real Lidarr profiles
+    NEST qualities inside GROUPS (the 'Lossless' group wraps FLAC/ALAC). The flat loop saw only the
+    group wrapper and returned an EMPTY allowed set. The walk must recurse so an allowed group's nested
+    FLAC/ALAC are collected."""
+    arr_json = {
+        "id": 3, "name": "Any",
+        "cutoff": 50,   # FLAC quality id (nested inside the Lossless group)
+        "items": [
+            {"allowed": False, "quality": {"id": 10, "name": "MP3-320"}},
+            # a GROUP wrapper (no `quality` key; member qualities live in nested `items`):
+            {"id": 1000, "name": "Lossless", "allowed": True, "items": [
+                {"allowed": True, "quality": {"id": 40, "name": "ALAC"}},
+                {"allowed": True, "quality": {"id": 50, "name": "FLAC"}},
+            ]},
+        ],
+    }
+    adapter = LidarrAdapter("http://test-arr", "k", _profile_client(arr_json))
+    prof = adapter.get_quality_profile(3)
+    assert prof.allowed == frozenset({RANK_ALAC, RANK_FLAC}), "nested FLAC/ALAC must be collected"
+    assert prof.cutoff_rank == RANK_FLAC
+
+
 def test_get_quality_profile_mp3_320_cutoff_maps_allowed_and_cutoff():
     """An MP3-320-cutoff profile maps allowed {320,ALAC,FLAC} with cutoff_rank at the MP3-320 tier."""
     arr_json = {

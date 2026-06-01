@@ -71,6 +71,37 @@ def _rank_for_quality_name(name: Optional[str]) -> Optional[int]:
     return _LIDARR_QUALITY_RANKS.get(name.strip().lower())
 
 
+def _collect_quality_ranks(items, allowed_ranks, id_to_rank, parent_allowed=False):
+    """Recursively walk a Lidarr quality-profile `items[]`, collecting allowed neutral ranks.
+
+    Lidarr NESTS qualities inside GROUPS: a profile item is either a single quality
+    {"quality": {id,name}, "allowed": bool} OR a group {"id","name","allowed","items":[...]} whose
+    member qualities live in the nested `items`. The previous flat loop only looked at the top level,
+    so for any profile that groups its lossless qualities (the default 'Lossless' group holding FLAC/
+    ALAC) it saw the group wrapper (no resolvable rank) and NEVER reached the nested FLAC -> allowed
+    came back EMPTY -> the gate rejected EVERY candidate (FLAC included) as 'not in allowed=[]'.
+
+    A leaf quality is allowed when its own `allowed` is set OR an enclosing group is allowed (Lidarr
+    enables a whole group via the group checkbox). Flat profiles (no nested `items`) behave exactly as
+    before, so existing fixtures/tests are unaffected."""
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        own_allowed = bool(item.get("allowed")) or parent_allowed
+        nested = item.get("items")
+        if isinstance(nested, list) and nested:
+            _collect_quality_ranks(nested, allowed_ranks, id_to_rank, own_allowed)
+            continue
+        q = item.get("quality") if isinstance(item.get("quality"), dict) else item
+        q = q or {}
+        rank = _rank_for_quality_name(q.get("name"))
+        qid = q.get("id")
+        if rank is not None and qid is not None:
+            id_to_rank[qid] = rank
+        if own_allowed and rank is not None:
+            allowed_ranks.add(rank)
+
+
 class LidarrAdapter:
     """Reads monitored missing + cutoff-unmet albums from Lidarr and maps them to GapItems.
 
@@ -188,17 +219,10 @@ class LidarrAdapter:
 
         allowed_ranks = set()
         id_to_rank = {}
-        for item in body.get("items") or []:
-            if not isinstance(item, dict):
-                continue
-            q = item.get("quality") if isinstance(item.get("quality"), dict) else item
-            q = q or {}
-            rank = _rank_for_quality_name(q.get("name"))
-            qid = q.get("id")
-            if rank is not None and qid is not None:
-                id_to_rank[qid] = rank
-            if item.get("allowed") and rank is not None:
-                allowed_ranks.add(rank)
+        # Recurse so Lidarr quality GROUPS (e.g. the 'Lossless' group wrapping FLAC/ALAC) are walked —
+        # a flat loop missed the nested qualities and returned an EMPTY allowed set (every candidate,
+        # FLAC included, then failed the gate as 'not in allowed=[]').
+        _collect_quality_ranks(body.get("items"), allowed_ranks, id_to_rank)
 
         # `cutoff` is a quality id (or a nested {id} group); resolve it to a neutral rank.
         cutoff = body.get("cutoff")
