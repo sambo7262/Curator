@@ -90,10 +90,18 @@ def gate(candidate, profile: Profile) -> Tuple[bool, str]:
     (True, "quality OK: ...") only if every audio file is at/above cutoff AND allowed. Reason strings
     follow RESEARCH 334. Pure; the pre-download structural defense against Pitfall 3 (downgrades).
     """
+    allowed_str = sorted(profile.allowed)
     for f in candidate.audio_files():
         rank = rank_for(f.extension, f.bitrate_kbps)
         if rank is None or rank not in profile.allowed:
-            return False, f"quality REJECT: {f.filename} not in profile allowed set"
+            # Include the computed rank + the profile's allowed ranks + cutoff so a live decline is
+            # diagnosable: rank=None => the file's format/bitrate was not recognized; a real rank not
+            # in `allowed` => the *arr profile genuinely does not permit that quality (config), e.g. a
+            # FLAC (rank 5) rejected by an MP3-only profile allowed={3}.
+            return False, (
+                f"quality REJECT: {f.filename} (rank {rank}) not in profile "
+                f"allowed={allowed_str} cutoff={profile.cutoff_rank}"
+            )
         if rank < profile.cutoff_rank:
             return (
                 False,

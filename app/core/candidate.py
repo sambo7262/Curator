@@ -108,6 +108,63 @@ def _extension_of(filename: str) -> str:
     return stem.rsplit(".", 1)[-1].lower()
 
 
+def _common_dir(filenames) -> str:
+    """Deepest directory shared by a set of slskd file paths (`\\`- or `/`-separated), or ''.
+
+    slskd search responses carry NO top-level folder/directory field — the directory lives inside
+    each file's `filename` (e.g. `music\\Queen\\A Kind of Magic\\01 - One Vision.flac`). Without this
+    the candidate folder was empty, release_parse got "", and EVERY live candidate matched at the
+    max-penalty distance (nothing ever passed the match gate). This recovers the album directory as
+    the common parent of the files' paths so the matcher has real artist/album text to work with."""
+    dirs = []
+    for fn in filenames:
+        if not isinstance(fn, str) or not fn:
+            continue
+        norm = fn.replace("\\", "/")
+        if "/" in norm:
+            dirs.append([s for s in norm.rsplit("/", 1)[0].split("/") if s])
+    if not dirs:
+        return ""
+    common = dirs[0]
+    for parts in dirs[1:]:
+        i = 0
+        while i < len(common) and i < len(parts) and common[i] == parts[i]:
+            i += 1
+        common = common[:i]
+        if not common:
+            break
+    return "/".join(common)
+
+
+def _parse_slskd_path(path: str):
+    """Parse a slskd album-directory PATH into a ParsedRelease, recovering the artist from the path.
+
+    Soulseek shares overwhelmingly nest as `.../<artist>/<album>/<track>` (live-confirmed: `music\\
+    Queen\\A Kind of Magic\\..`, `@@mfapl\\Music (320)\\Queen\\A Kind of Magic\\..`). release_parse
+    splits a single folder name on ' - ', which a path like that does NOT contain, so artist/album
+    came out empty. Strategy: parse the LEAF segment (the album folder — yields album + year/format,
+    and the artist too when the leaf is itself 'Artist - Album'); when the leaf yields no artist and
+    there is a parent segment, take the IMMEDIATE parent directory as the artist (the album folder's
+    parent is the artist by Soulseek convention). A single-segment folder (the offline-fixture and
+    'Artist - Album (Year) [FMT]' cases) parses exactly as before — the parent logic never triggers,
+    so the matcher's corpus calibration is unchanged."""
+    if not isinstance(path, str) or not path.strip():
+        return release_parse.parse("")
+    segs = [s for s in path.replace("\\", "/").split("/") if s.strip()]
+    if not segs:
+        return release_parse.parse("")
+    parsed = release_parse.parse(segs[-1])
+    if parsed.artist is None and len(segs) >= 2:
+        # the album folder's parent dir is the artist; reuse release_parse to fold/clean it
+        artist = release_parse.parse(segs[-2]).album
+        if artist:
+            parsed = release_parse.ParsedRelease(
+                artist=artist, album=parsed.album, year=parsed.year,
+                format=parsed.format, source=parsed.source, edition=parsed.edition,
+            )
+    return parsed
+
+
 def _int_or_none(value: Any) -> Optional[int]:
     """Coerce a slskd attr to int, tolerating None/str/garbage -> None (never raises)."""
     if value is None or isinstance(value, bool):
@@ -134,7 +191,6 @@ def build_candidate(result: Dict[str, Any]) -> Candidate:
     if not isinstance(result, dict):
         result = {}
 
-    folder = result.get("folder") or result.get("directory") or ""
     raw_files = result.get("files") or []
     files = []
     for rf in raw_files:
@@ -154,7 +210,11 @@ def build_candidate(result: Dict[str, Any]) -> Candidate:
             )
         )
 
-    parsed = release_parse.parse(folder)
+    # slskd responses carry no folder field -> derive the album directory from the files' paths.
+    folder = result.get("folder") or result.get("directory") or _common_dir(
+        [f.filename for f in files]
+    )
+    parsed = _parse_slskd_path(folder)
     return Candidate(
         folder=folder,
         files=tuple(files),
