@@ -196,3 +196,44 @@ def test_all_orphan_states_swept_and_clients_closed(conn):
     assert _status_of(conn, "52") == "imported"
     assert factory.client.closed is True            # CR-02: client closed in finally
     assert adapter.execute_import_calls == 0
+
+
+# --- boot re-arm: clear stuck/quarantined/permanently-unavailable backoff on rebuild --------------
+
+class _ResetOffSettings:
+    """Settings stub with the boot re-arm explicitly disabled."""
+    acq_reset_stuck_on_start = False
+
+
+def test_rearm_clears_stuck_quarantined_and_permanently_unavailable(conn):
+    """rearm_stuck_on_start resets every stuck/quarantined/permanently-unavailable row to a clean
+    pending slate (attempt_count=0, next_attempt_at=NULL) so a rebuild re-attempts the whole backlog
+    immediately. A `pending`/`imported`/in-flight row is left untouched."""
+    _seed(conn, "60", "stuck", attempt_count=2)
+    _seed(conn, "61", "quarantined", attempt_count=1)
+    _seed(conn, "62", "permanently-unavailable", attempt_count=3)
+    _seed(conn, "63", "pending")                 # already pending — untouched
+    _seed(conn, "64", "imported")                # terminal — must NOT be re-armed
+    repo.record_attempt(conn, "lidarr", "60", 2, "2999-01-01T00:00:00Z", "stuck")  # future backoff
+    conn.commit()
+
+    n = reconcile.rearm_stuck_on_start(conn, threading.Lock(), _Settings())
+
+    assert n == 3
+    for aid in ("60", "61", "62"):
+        assert _status_of(conn, aid) == "pending"
+        assert _attempt_of(conn, aid) == 0
+        assert repo.get_gap(conn, "lidarr", aid)["next_attempt_at"] is None
+    assert _status_of(conn, "63") == "pending"
+    assert _status_of(conn, "64") == "imported"  # terminal state untouched
+
+
+def test_rearm_is_a_noop_when_disabled(conn):
+    """With acq_reset_stuck_on_start False, no row is touched and the stuck backoff survives."""
+    _seed(conn, "70", "stuck", attempt_count=2)
+
+    n = reconcile.rearm_stuck_on_start(conn, threading.Lock(), _ResetOffSettings())
+
+    assert n == 0
+    assert _status_of(conn, "70") == "stuck"
+    assert _attempt_of(conn, "70") == 2

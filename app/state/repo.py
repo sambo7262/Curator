@@ -95,6 +95,28 @@ def list_by_status(conn: sqlite3.Connection, status: str) -> List[sqlite3.Row]:
     ).fetchall()
 
 
+# The dead-end / backed-off retry states a boot re-arm clears (reconcile.rearm_stuck_on_start).
+# `stuck`/`quarantined` are already retry-eligible but gated by their backoff `next_attempt_at`;
+# `permanently-unavailable` only re-enters after the 30-day dormant TTL. Re-arming nulls the gates so
+# a container rebuild re-attempts the whole backlog immediately (owner-driven, testing-friendly).
+REARMABLE_STATES = ("stuck", "quarantined", "permanently-unavailable")
+
+
+def rearm_retryable(conn: sqlite3.Connection) -> int:
+    """Reset every stuck/quarantined/permanently-unavailable row to a clean `pending` retry slate.
+
+    Sets status='pending', attempt_count=0, next_attempt_at=NULL so select_eligible picks the row up
+    THIS cycle (subject only to the grace window) instead of waiting out an 8h/24h backoff or the
+    30-day dormant TTL. Returns the number of rows re-armed. Single UPDATE (autocommit connection);
+    the caller serializes it through the shared writer lock (D-16).
+    """
+    cur = conn.execute(
+        "UPDATE items SET status = 'pending', attempt_count = 0, next_attempt_at = NULL"
+        " WHERE status IN ('stuck', 'quarantined', 'permanently-unavailable')"
+    )
+    return cur.rowcount
+
+
 def record_staged_file(conn: sqlite3.Connection, item_id: int, staging_path: str) -> int:
     """Insert a staged_files row when a download begins; return its rowid (D-05/D-06 anchor).
 

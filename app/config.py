@@ -60,6 +60,7 @@ class Settings:
     acq_grace_seconds: float = 259200.0               # D-01 3-day Usenet-politeness grace window
     acq_max_attempts: int = 3                         # D-07 give-up threshold -> permanently-unavailable
     acq_dormant_seconds: float = 2592000.0            # D-09 30-day dormant re-check TTL
+    acq_reset_stuck_on_start: bool = True             # boot re-arm: clear stuck/quarantined backoff on rebuild
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -111,6 +112,8 @@ class Settings:
             acq_grace_seconds=float(os.getenv("ACQ_GRACE_SECONDS", "259200.0")),
             acq_max_attempts=int(os.getenv("ACQ_MAX_ATTEMPTS", "3")),
             acq_dormant_seconds=float(os.getenv("ACQ_DORMANT_SECONDS", "2592000.0")),
+            acq_reset_stuck_on_start=os.getenv("ACQ_RESET_STUCK_ON_START", "true").strip().lower()
+            not in ("0", "false", "no"),
         )
 
 

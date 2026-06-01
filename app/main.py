@@ -52,13 +52,19 @@ def _startup() -> None:
     offline 3.9 sandbox and tests can monkeypatch build_adapters / Scheduler / reconcile_on_startup.
     """
     from core.gap_detector import build_adapters
-    from core.reconcile import reconcile_on_startup
+    from core.reconcile import reconcile_on_startup, rearm_stuck_on_start
     from core.scheduler import Scheduler
 
     conn = connect(settings.db_path)
     run_migrations(conn)
     app.state.db = conn
     app.state.shares_ok = True
+
+    # Boot re-arm (owner live-rollout): a container rebuild clears the leftover stuck/quarantined/
+    # permanently-unavailable backoff so the WHOLE backlog re-attempts immediately (gated by
+    # acq_reset_stuck_on_start, default on). Pure DB op under the shared lock — runs BEFORE the
+    # adapter-dependent reconcile so an *arr/VPN flap at boot can never skip it.
+    rearm_stuck_on_start(conn, _detect_lock, settings)
 
     # D-14/REL-02: reset crash orphans cleanly (verify-by-requery guard, no double-import, no burn).
     # Defensive: a boot-time infra/config fault while BUILDING the adapters (e.g. *arr unreachable or

@@ -80,6 +80,31 @@ def _gapitem_from_row(row: sqlite3.Row) -> GapItem:
     )
 
 
+def rearm_stuck_on_start(conn: sqlite3.Connection, lock: Any, settings: Any) -> int:
+    """Clear the retry backoff on every stuck/quarantined/permanently-unavailable row at boot.
+
+    The owner's intent (live-rollout): a container rebuild should re-attempt the WHOLE backlog
+    immediately, not honor the per-item 8h/24h backoff or 30-day dormant TTL left over from the prior
+    run's failures. This nulls those gates (status->pending, attempt_count=0, next_attempt_at=NULL) so
+    select_eligible re-picks them this cycle (still subject to the grace window). Gated by
+    settings.acq_reset_stuck_on_start (default True) so it can be turned off later WITHOUT a rebuild.
+
+    Pure DB op — NO adapters, NO network — so it always runs on boot even if the *arr clients can't be
+    built. Writes through the shared writer lock (single-writer, D-16). Returns the rows re-armed.
+    """
+    if not getattr(settings, "acq_reset_stuck_on_start", True):
+        return 0
+    with lock:
+        n = repo.rearm_retryable(conn)
+    if n:
+        log.info(
+            "reconcile: re-armed %d stuck/quarantined/permanently-unavailable item(s) -> pending "
+            "(attempt_count + backoff cleared) on boot",
+            n,
+        )
+    return n
+
+
 def reconcile_on_startup(
     conn: sqlite3.Connection,
     lock: Any,
