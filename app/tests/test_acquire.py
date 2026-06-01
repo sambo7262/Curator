@@ -487,6 +487,33 @@ def test_terminal_failure_falls_to_next(conn, settings):
     assert slskd.enqueued[-1][0] == "ok_b"
 
 
+def test_failed_candidate_partial_is_cleaned_up_before_next(conn, settings):
+    """A hard-failed candidate (the 8/10-done-2-errored case) has its partial download CANCELLED and
+    its staging leaf PURGED before we fall to the next candidate — the 'no leftover junk' guarantee on
+    the abandon path. The next candidate then imports cleanly."""
+    from pathlib import Path
+
+    item = _gap()
+    _seed(conn, item)
+    a = _candidate(folder="Alpha", username="fail_a")
+    b = _candidate(folder="Beta", username="ok_b")
+    # the failed peer left already-downloaded tracks on disk under its landing leaf
+    partial = Path(settings.staging_root) / "Alpha"
+    partial.mkdir(parents=True, exist_ok=True)
+    (partial / "08 - half an album.flac").write_text("junk")
+
+    script = {"fail_a": [_P(0, "failure")], "ok_b": [_P(24_000_000, "success")]}
+    slskd = _FakeSlskdCandidates([a, b], progress_script=script, complete_after=0)
+    adapter = FakeAdapter()
+    out = acquire.acquire_item(
+        item, adapter, slskd, conn, settings, now=FakeClock(),
+        gate_evaluate=_stub_gate({"Alpha", "Beta"}), poll_hook=lambda: None,
+    )
+    assert out == "imported"
+    assert not partial.exists(), "the failed candidate's partial download must be purged (no junk left)"
+    assert "fail_a" in {u for u, _ in slskd.cancelled}, "the failed transfer must be cancelled+removed"
+
+
 # ====================================================================================================
 # ACQ-01/D-08: decline -> one relaxed-query retry -> still decline -> stuck
 # ====================================================================================================

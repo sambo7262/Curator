@@ -255,6 +255,29 @@ def _import_and_verify(item, adapter, staging_path_str, staged_id, conn, setting
     return "imported"
 
 
+def _cleanup_abandoned(item, slskd, handle, staging_path_str, settings) -> None:
+    """Best-effort cleanup of an abandoned (failed/stalled) candidate before falling to the next one —
+    the 'no leftover junk' guarantee on the abandon path (D-05 extended to the non-import exits).
+
+    A terminal FAILURE (e.g. 8/10 tracks completed, 2 errored) leaves the peer's already-downloaded
+    files on disk and the transfer in slskd's list; a STALL was cancelled inside the watch but its
+    on-disk partials can linger. Either way: (1) cancel+remove the transfer from slskd (idempotent —
+    cancel_transfer no-ops when the files are already gone from the per-user list), and (2) purge the
+    staging leaf dir (guarded by assert_under_root inside purge_staging) so nothing unwanted is left
+    behind. NEVER raises — cleanup must never crash the acquisition loop."""
+    from core import staging
+
+    try:
+        slskd.cancel_transfer(handle, remove=True)
+    except Exception as e:  # a cancel hiccup must not block the next-candidate fallback
+        log.warning("%s: cancel of abandoned transfer hiccuped (ignored): %s", _identity(item), e)
+    try:
+        staging.purge_staging(staging_path_str, settings.staging_root)
+        log.info("%s: abandoned download cleaned up (cancel+purge) before next candidate", _identity(item))
+    except Exception as e:  # a purge hiccup must not block the next-candidate fallback
+        log.warning("%s: purge of abandoned download hiccuped (ignored): %s", _identity(item), e)
+
+
 def _batch_label(item: GapItem) -> str:
     """Deterministic per-item staging label — the FALLBACK staging subdir name used only when the
     client could not derive the real slskd landing dir (the leaf of the peer's remote directory, A2).
@@ -359,7 +382,10 @@ def acquire_item(
 
         outcome = _watch_to_completion(slskd, handle, settings, now, poll_hook)
         if outcome != "success":
-            # stalled (already cancelled inside the watch) or hard failure -> next candidate.
+            # stalled or hard failure (e.g. a partial 8/10-track grab) -> clean up the abandoned
+            # download (cancel+remove from slskd + purge the staging leaf) so no junk is left behind,
+            # THEN fall to the next accepted candidate (D-02).
+            _cleanup_abandoned(item, slskd, handle, staging_path_str, settings)
             continue
 
         # 4. Completed -> import + verify + purge / quarantine (D-03/D-05/D-06). The import source +
