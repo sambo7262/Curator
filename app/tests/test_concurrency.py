@@ -24,6 +24,7 @@ def _settings(max_concurrent):
         acq_grace_seconds=259200.0,
         acq_max_attempts=3,
         acq_dormant_seconds=2592000.0,
+        acq_recheck_seconds=86400.0,
     ))()
 
 

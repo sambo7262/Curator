@@ -34,10 +34,12 @@ from state import repo
 
 log = logging.getLogger(__name__)
 
-# Per-cycle eligibility cap multiplier (OQ-3): we pull up to MAX_CONCURRENT * ROOM_MULTIPLIER items
-# per cycle so a cycle has a modest queue of work to feed the bounded executor (enough to keep all
-# workers busy, but a hard ceiling so the ~1493-gap backlog is never firehosed in one pass — Pitfall 1).
-ROOM_MULTIPLIER = 10
+# Drain model (owner UX 2026-06: "just search continuously until everything left is stuck, then stall
+# out"): a cycle pulls the WHOLE eligible set and works it to exhaustion, NOT a fixed slice. The flood
+# control is no longer a LIMIT — it is the bounded executor (MAX_CONCURRENT) plus the natural per-item
+# search-collection window (~12s), which together pace slskd gently while the backlog drains. DRAIN_ROOM
+# is just a sanity ceiling on a single SELECT (far above any realistic ledger) so the query is bounded.
+DRAIN_ROOM = 100_000
 
 
 def _identity(item: GapItem) -> str:
@@ -118,10 +120,19 @@ def apply_result(conn, lock: threading.Lock, item: GapItem, outcome: str, settin
       "partial"                        -> attempt_count reset to 0; next_attempt_at = now + partial
                                           cooldown; status 'partial' (progress, not a failure — revisit
                                           later for the missing tracks, never permanently-unavailable).
-      "quarantined" / "stuck"          -> attempt_count += 1, last_checked_at = now;
-                                          if attempt_count >= acq_max_attempts -> status
-                                          'permanently-unavailable', next_attempt_at = now + dormant;
-                                          else status unchanged outcome, next_attempt_at = now + backoff.
+      "stuck"                          -> a search/match MISS (0 candidates, gate-declined, or found-
+                                          but-undownloadable). NEVER exiled (owner policy 2026-06:
+                                          never permanently ignore a gap). attempt_count += 1 (for
+                                          observability only), status stays 'stuck', next_attempt_at =
+                                          now + acq_recheck_seconds — it rests, then the daemon re-sweeps
+                                          it later (a fuller/again-online source or a matcher improvement
+                                          may have appeared). Once the backlog is all-'stuck' the cycle
+                                          finds nothing eligible and goes quiet until a recheck comes due.
+      "quarantined"                    -> we DID download it but the *arr rejected the import (re-importing
+                                          the same reject won't help). attempt_count += 1; if it reaches
+                                          acq_max_attempts -> 'permanently-unavailable', next_attempt_at =
+                                          now + dormant (30-day re-check); else status 'quarantined',
+                                          next_attempt_at = now + backoff.
       "infra-skip" / "skip-usenet-active" / "dry-run" / "error-skip"
                                        -> NO write (item stays eligible next cycle).
 
@@ -155,7 +166,25 @@ def apply_result(conn, lock: threading.Lock, item: GapItem, outcome: str, settin
         log.info("%s: partial import -> revisit cooldown (next at %s)", _identity(item), next_at)
         return
 
-    # Genuine fail: quarantined or stuck. Bump the attempt counter and set the backoff/terminal anchor.
+    if outcome == "stuck":
+        # Search/match MISS — never exiled. Rest on the recheck cooldown and stay 'stuck' (a
+        # recheckable resting state, NOT permanently-unavailable). attempt_count is bumped for
+        # observability only; it never trips a give-up. acquire_item already set status='stuck' on
+        # the same conn. Once every remaining gap is 'stuck' the next select_eligible returns nothing
+        # and the daemon goes quiet until a recheck comes due (the owner's expected "stalls out" UX).
+        with lock:
+            row = repo.get_gap(conn, item.arr_app, item.arr_id)
+            prev = row["attempt_count"] if row is not None else 0
+            attempt_count = prev + 1
+            next_at = _iso(now + _dt.timedelta(seconds=settings.acq_recheck_seconds))
+            repo.record_attempt(conn, item.arr_app, item.arr_id, attempt_count, next_at, "stuck")
+        log.info("%s: stuck (attempt %d) -> recheck at %s (never exiled)",
+                 _identity(item), attempt_count, next_at)
+        return
+
+    # Genuine import failure: quarantined. We downloaded files but the *arr rejected the import, so
+    # re-importing the same reject won't help — bump the attempt counter and, at the cap, exile to a
+    # 30-day dormant re-check (a new/better source may appear). This is the ONLY path that escalates.
     with lock:
         row = repo.get_gap(conn, item.arr_app, item.arr_id)
         prev = row["attempt_count"] if row is not None else 0
@@ -163,13 +192,13 @@ def apply_result(conn, lock: threading.Lock, item: GapItem, outcome: str, settin
         if attempt_count >= settings.acq_max_attempts:
             next_at = _iso(now + _dt.timedelta(seconds=settings.acq_dormant_seconds))
             status = "permanently-unavailable"
-            log.info("%s: attempt %d >= max %d -> permanently-unavailable (dormant recheck in %ds)",
+            log.info("%s: quarantine attempt %d >= max %d -> permanently-unavailable (dormant recheck in %ds)",
                      _identity(item), attempt_count, settings.acq_max_attempts, settings.acq_dormant_seconds)
         else:
             next_at = _iso(now + _dt.timedelta(seconds=repo.backoff_for(attempt_count)))
-            status = outcome  # 'quarantined' or 'stuck'
-            log.info("%s: attempt %d -> backoff (%s, retry at %s)",
-                     _identity(item), attempt_count, status, next_at)
+            status = "quarantined"
+            log.info("%s: quarantine attempt %d -> backoff (retry at %s)",
+                     _identity(item), attempt_count, next_at)
         repo.record_attempt(conn, item.arr_app, item.arr_id, attempt_count, next_at, status)
 
 
@@ -206,16 +235,22 @@ def dispatch(items: List[GapItem], by_app: Dict[str, Any], slskd, conn, lock: th
     return outcomes
 
 
-def run_cycle(app, settings, first_pass: bool = False, lock: threading.Lock = None) -> None:
+def run_cycle(app, settings, first_pass: bool = False, lock: threading.Lock = None,
+              should_stop: Callable[[], bool] = None) -> None:
     """Run ONE acquisition cycle on the app's single retained connection (app.state.db).
 
     Steps: (1) under the writer lock, batched detect_gaps (D-15); (2) ensure_shares (D-10 self-heal,
-    never blocks acquisition); (3) under the writer lock, select_eligible(grace+backoff+dormant, room);
-    (4) bounded dispatch of run_one over the eligible items; (5) apply_result for each outcome.
+    never blocks acquisition); (3) under the writer lock, select_eligible(grace+backoff+dormant) for
+    the WHOLE eligible set; (4) DRAIN it to exhaustion — dispatch in stop-aware batches of
+    MAX_CONCURRENT (bounded parallelism is the flood control, the per-item search window paces slskd),
+    apply_result per outcome. The drain continues until the backlog is worked or `should_stop()` is
+    set (a clean shutdown interrupts between batches, ~one batch latency).
 
     The connection + the shared writer lock are read off `app.state` (the lock is main.py's
     _detect_lock, shared so a manual /detect and a cycle can never collide). Adapters/clients are
     built lazily and CLOSED in finally (CR-02). slskd clients likewise."""
+    if should_stop is None:
+        should_stop = lambda: False  # noqa: E731 — default: never interrupt (direct/test callers)
     conn = getattr(app.state, "db", None)
     if conn is None:
         log.warning("scheduler cycle: ledger connection not ready; skipping")
@@ -248,20 +283,34 @@ def run_cycle(app, settings, first_pass: bool = False, lock: threading.Lock = No
             grace_cutoff = _iso(now - _dt.timedelta(seconds=settings.acq_grace_seconds))
             dormant_cutoff = _iso(now)  # permanently-unavailable rows whose next_attempt_at <= now
             now_iso = _iso(now)
-            room = max(int(settings.max_concurrent) * ROOM_MULTIPLIER, int(settings.max_concurrent))
             with lock:
-                eligible_rows = repo.select_eligible(conn, grace_cutoff, now_iso, dormant_cutoff, room)
+                eligible_rows = repo.select_eligible(
+                    conn, grace_cutoff, now_iso, dormant_cutoff, DRAIN_ROOM
+                )
             if not eligible_rows:
                 log.info("scheduler cycle: no eligible items this pass")
                 return
-            items = [_gapitem_from_row(r) for r in eligible_rows]
-            log.info("scheduler cycle: dispatching %d eligible item(s) (cap %d)",
-                     len(items), settings.max_concurrent)
+            eligible = [_gapitem_from_row(r) for r in eligible_rows]
+            log.info("scheduler cycle: draining %d eligible item(s) (cap %d)",
+                     len(eligible), settings.max_concurrent)
 
-            # 4. Bounded dispatch -> 5. apply_result per outcome (all writes serialized on the lock).
-            outcomes = dispatch(items, by_app, slskd, conn, lock, settings)
-            for item, outcome in zip(items, outcomes):
-                apply_result(conn, lock, item, outcome, settings)
+            # 4. DRAIN the whole eligible set to exhaustion in stop-aware batches of MAX_CONCURRENT.
+            #    dispatch bounds each batch's parallelism to the cap (the flood control), and the
+            #    per-item search-collection window paces slskd. should_stop() is checked between
+            #    batches so a clean shutdown interrupts a long drain within ~one batch. 5. apply_result
+            #    per outcome (all writes serialized on the lock via LockedConn / the explicit lock).
+            batch_size = max(int(settings.max_concurrent), 1)
+            done = 0
+            for start in range(0, len(eligible), batch_size):
+                if should_stop():
+                    log.info("scheduler cycle: stop requested -> drain interrupted at %d/%d",
+                             done, len(eligible))
+                    break
+                batch = eligible[start:start + batch_size]
+                outcomes = dispatch(batch, by_app, slskd, conn, lock, settings)
+                for item, outcome in zip(batch, outcomes):
+                    apply_result(conn, lock, item, outcome, settings)
+                done += len(batch)
         finally:
             for c in slskd_clients:
                 c.close()
@@ -346,6 +395,7 @@ class Scheduler:
             if not settings.acq_enabled:
                 log.info("scheduler: ACQ_ENABLED is false -> skipping cycle (kill-switch)")
                 return
-            run_cycle(self._app, settings, first_pass=first_pass, lock=self._lock)
+            run_cycle(self._app, settings, first_pass=first_pass, lock=self._lock,
+                      should_stop=self._stop_event.is_set)
         except Exception as e:  # noqa: BLE001 — a cycle exception must NEVER kill the daemon (REL-01)
             log.exception("scheduler: cycle raised (%s); loop continues", e)

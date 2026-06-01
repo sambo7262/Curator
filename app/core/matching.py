@@ -46,6 +46,11 @@ class MatchConfig:
     w_track_titles: float = 4.0      # RAISED — per-track coverage is the strongest authenticity signal
     strong_thresh: float = 0.15      # ACCEPT only if total distance <= this (conservative ~1σ)
     rec_gap_thresh: float = 0.10     # runner-up must be >= this much worse, else ambiguous -> decline
+    same_album_thresh: float = 0.30  # a within-gap rival is a DIFFERENT release (ambiguity) only if its
+    #                                  (artist, album) is fuzzily THIS far from the best. Edition/year/
+    #                                  spelling variants of the SAME album fold under it and are treated
+    #                                  as same-release copies (the selector picks the source), not
+    #                                  ambiguity — exact-key equality false-declined them live (2026-06).
 
 
 def _norm(s: Optional[str]) -> str:
@@ -68,6 +73,23 @@ def _str_distance(a: Optional[str], b: Optional[str]) -> float:
     (max penalty) — token_set_ratio("", "radiohead") == 0 — never a crash (SP-3 graceful).
     """
     return 1.0 - (fuzz.token_set_ratio(_norm(a), _norm(b)) / 100.0)
+
+
+def _same_release(a: Candidate, b: Candidate, thresh: float) -> bool:
+    """Are two candidates the SAME release (just different copies/editions), fuzzily?
+
+    True iff BOTH the parsed artist AND the parsed album are within `thresh` string-distance of each
+    other. This replaces the old exact (artist, album) key equality, which treated every edition /
+    year / spelling variant of one album as a different release ("A Kind of Magic" vs "(1986) A Kind
+    of Magic" vs "A Kind of Magic (Remastered)") and so false-declined gettable popular titles whose
+    variant copies tied within rec_gap (live 2026-06). token_set_ratio tolerance means a variant adds
+    a token but stays well under the threshold, while a genuinely different album ("OK Computer" vs
+    "Kid A") sits far above it and is still flagged as cross-release ambiguity. Pure; never raises.
+    """
+    return (
+        _str_distance(a.parsed_artist, b.parsed_artist) <= thresh
+        and _str_distance(a.parsed_album, b.parsed_album) <= thresh
+    )
 
 
 def _track_count_distance(cand_audio_files: int, manifest_tracks: int) -> float:
@@ -202,12 +224,16 @@ def recommend(
     # release tying within the gap ("which album is this?"). Decline ONLY when a within-gap rival is a
     # different (artist, album) than the best; same-album copies fall through to ACCEPT (RESEARCH §3,
     # the rec-gap was always meant to guard cross-release confusion, not same-release duplication).
-    best_key = (_norm(best_c.parsed_artist), _norm(best_c.parsed_album))
+    #
+    # The same-release test is FUZZY (_same_release), not exact-key: edition/year/spelling variants of
+    # ONE album ("A Kind of Magic" vs "(1986) A Kind of Magic") fold under same_album_thresh and are
+    # treated as copies, so they no longer false-decline a gettable title (live 2026-06). A genuinely
+    # different album stays far above the threshold and still trips the ambiguous decline.
     rivals = [
         c
         for d, c, _ in ordered[1:]
         if (d - best_d) < cfg.rec_gap_thresh
-        and (_norm(c.parsed_artist), _norm(c.parsed_album)) != best_key
+        and not _same_release(best_c, c, cfg.same_album_thresh)
     ]
     if rivals:
         return (

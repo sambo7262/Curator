@@ -35,7 +35,7 @@ pytest.importorskip("rapidfuzz", reason="matcher needs rapidfuzz (present at CI/
 
 from core.candidate import build_candidate  # noqa: E402  (after importorskip by design)
 from core.manifest import Manifest  # noqa: E402
-from core.matching import MatchConfig, recommend, score  # noqa: E402
+from core.matching import MatchConfig, _same_release, recommend, score  # noqa: E402
 
 
 # --- local builders (SP-6: keep tests independent of live wiring) -------------------------------
@@ -233,6 +233,37 @@ def test_recommend_different_release_within_gap_declines():
     assert decision == "decline"
     assert chosen is None
     assert any("different release" in r for r in out_r)
+
+
+def test_same_release_is_fuzzy_not_exact_key():
+    """The rec-gap same-release test (_same_release) is FUZZY: token-varying spellings of ONE album
+    (whose EXACT parsed (artist, album) keys differ) are still the same release, so they no longer
+    false-decline a gettable title (live 2026-06). A genuinely different album stays different."""
+    base = build_candidate({"folder": "Radiohead - OK Computer [FLAC]",
+                            "files": [{"filename": "01 - Airbag.flac"}]})
+    variant = build_candidate({"folder": "Radiohead - OK Computer OKNOTOK [FLAC]",
+                               "files": [{"filename": "01 - Airbag.flac"}]})
+    other = build_candidate({"folder": "Radiohead - Kid A [FLAC]",
+                             "files": [{"filename": "01 - Everything In Its Right Place.flac"}]})
+
+    # precondition: the variant's EXACT parsed album key DIFFERS from base (old logic = different release)
+    assert (base.parsed_artist, base.parsed_album) != (variant.parsed_artist, variant.parsed_album)
+    # fuzzy: a token-varying spelling of the same album folds together; a different album does not
+    assert _same_release(base, variant, MatchConfig().same_album_thresh) is True
+    assert _same_release(base, other, MatchConfig().same_album_thresh) is False
+
+
+def test_recommend_same_album_token_variant_accepts():
+    """End-to-end of the live fix: two copies of the same album with token-varying names tying within
+    rec_gap are treated as same-release copies (not ambiguity) -> ACCEPT (the selector picks a source).
+    Old exact-key logic declined this as a 'different release'."""
+    a = build_candidate({"folder": "Radiohead - OK Computer [FLAC]",
+                         "files": [{"filename": "01 - Airbag.flac"}, {"filename": "02 - Paranoid Android.flac"}]})
+    b = build_candidate({"folder": "Radiohead - OK Computer OKNOTOK [FLAC]",
+                         "files": [{"filename": "01 - Airbag.flac"}, {"filename": "02 - Paranoid Android.flac"}]})
+    decision, chosen, _, _ = recommend([(0.05, a, []), (0.10, b, [])])  # within rec_gap (0.10)
+    assert decision == "accept"
+    assert chosen is a
 
 
 def test_borderline_accept_just_inside_strong(load_fixture):

@@ -31,6 +31,12 @@ class Settings:
     # identical to the hard-coded scorer. gate.py reads these to build its MatchConfig.
     match_strong_thresh: float = 0.15      # accept iff best distance <= this (RESEARCH 323)
     match_rec_gap_thresh: float = 0.10     # decline-as-ambiguous unless 2nd-best is this far behind
+    match_same_album_thresh: float = 0.30  # a within-rec_gap rival counts as a DIFFERENT release only
+    #                                        if its (artist,album) is this fuzzily far from the best —
+    #                                        edition/year/spelling variants of the SAME album (e.g.
+    #                                        "A Kind of Magic" vs "(1986) A Kind of Magic") fall under
+    #                                        the threshold and are treated as same-release copies, not
+    #                                        ambiguity (they were being false-declined live, 2026-06).
     match_w_artist: float = 3.0            # per-sub-distance weights (RESEARCH 207-215)
     match_w_album: float = 3.0
     match_w_track_count: float = 4.0
@@ -61,6 +67,7 @@ class Settings:
     acq_max_attempts: int = 3                         # D-07 give-up threshold -> permanently-unavailable
     acq_dormant_seconds: float = 2592000.0            # D-09 30-day dormant re-check TTL
     acq_partial_cooldown_seconds: float = 604800.0    # partial-album revisit cooldown (7d): take the good tracks now, look for the missing ones later
+    acq_recheck_seconds: float = 86400.0              # 'stuck' rest/recheck cooldown (24h): a search/match miss is NEVER exiled — it rests, then the daemon re-sweeps it (owner policy 2026-06: never permanently ignore a gap)
     acq_reset_stuck_on_start: bool = True             # boot re-arm: clear stuck/quarantined backoff on rebuild
     acq_clear_downloads_on_start: bool = True          # boot sweep: cancel orphaned slskd downloads + purge their staging
 
@@ -83,6 +90,7 @@ class Settings:
             db_path=os.getenv("DB_PATH", "/db/curator.sqlite"),
             match_strong_thresh=float(os.getenv("MATCH_STRONG_THRESH", "0.15")),
             match_rec_gap_thresh=float(os.getenv("MATCH_REC_GAP_THRESH", "0.10")),
+            match_same_album_thresh=float(os.getenv("MATCH_SAME_ALBUM_THRESH", "0.30")),
             match_w_artist=float(os.getenv("MATCH_W_ARTIST", "3.0")),
             match_w_album=float(os.getenv("MATCH_W_ALBUM", "3.0")),
             match_w_track_count=float(os.getenv("MATCH_W_TRACK_COUNT", "4.0")),
@@ -115,6 +123,7 @@ class Settings:
             acq_max_attempts=int(os.getenv("ACQ_MAX_ATTEMPTS", "3")),
             acq_dormant_seconds=float(os.getenv("ACQ_DORMANT_SECONDS", "2592000.0")),
             acq_partial_cooldown_seconds=float(os.getenv("ACQ_PARTIAL_COOLDOWN_SECONDS", "604800.0")),
+            acq_recheck_seconds=float(os.getenv("ACQ_RECHECK_SECONDS", "86400.0")),
             acq_reset_stuck_on_start=os.getenv("ACQ_RESET_STUCK_ON_START", "true").strip().lower()
             not in ("0", "false", "no"),
             acq_clear_downloads_on_start=os.getenv("ACQ_CLEAR_DOWNLOADS_ON_START", "true").strip().lower()

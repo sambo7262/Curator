@@ -54,6 +54,7 @@ def _settings(**over):
         acq_max_attempts=3,
         acq_dormant_seconds=2592000.0,
         acq_partial_cooldown_seconds=604800.0,
+        acq_recheck_seconds=86400.0,
     )
     base.update(over)
     return type("S", (), base)()
@@ -231,7 +232,9 @@ def test_apply_result_partial_parks_on_cooldown_no_burn():
     assert row["next_attempt_at"] is not None, "the revisit cooldown anchor must be set"
 
 
-def test_apply_result_one_fail_backs_off_1h():
+def test_apply_result_stuck_rests_on_recheck_no_burn_toward_exile():
+    """A 'stuck' outcome (search/match MISS) rests on the recheck cooldown and stays 'stuck' — it
+    bumps attempt_count for observability but is NEVER marched toward permanently-unavailable."""
     conn = _conn()
     _seed_item(conn, 1, status="searching", attempt_count=0)
     lock = threading.Lock()
@@ -241,12 +244,29 @@ def test_apply_result_one_fail_backs_off_1h():
     ).fetchone()
     assert row["attempt_count"] == 1
     assert row["status"] == "stuck"
-    assert row["next_attempt_at"] is not None  # backoff anchor set (~now+1h)
+    assert row["next_attempt_at"] is not None  # recheck anchor set (~now + acq_recheck_seconds)
 
 
-def test_apply_result_three_fails_permanently_unavailable():
+def test_apply_result_stuck_never_exiled_even_past_max_attempts():
+    """REGRESSION (owner policy 2026-06: never permanently ignore a gap). A 'stuck' item that has
+    already failed many times is STILL only 'stuck' (recheckable) — the search/match path never
+    escalates to permanently-unavailable, no matter how many attempts. Only quarantine escalates."""
     conn = _conn()
-    _seed_item(conn, 1, status="stuck", attempt_count=2)  # this fail makes it the 3rd
+    _seed_item(conn, 1, status="stuck", attempt_count=9)  # well past acq_max_attempts
+    lock = threading.Lock()
+    scheduler.apply_result(conn, lock, _item(arr_id="1"), "stuck", _settings(acq_max_attempts=3))
+    row = conn.execute(
+        "SELECT status, attempt_count FROM items WHERE arr_id='1'"
+    ).fetchone()
+    assert row["status"] == "stuck", "a search/match miss must NEVER be exiled"
+    assert row["attempt_count"] == 10  # counter advances (observability) but triggers no give-up
+
+
+def test_apply_result_three_quarantines_permanently_unavailable():
+    """Quarantine is the ONE escalating path: we downloaded files but the *arr rejected the import,
+    so re-importing the same reject is futile -> exile to a 30-day dormant re-check at the cap."""
+    conn = _conn()
+    _seed_item(conn, 1, status="quarantined", attempt_count=2)  # this quarantine makes it the 3rd
     lock = threading.Lock()
     scheduler.apply_result(conn, lock, _item(arr_id="1"), "quarantined", _settings(acq_max_attempts=3))
     row = conn.execute(
@@ -331,6 +351,66 @@ def test_dispatch_isolates_one_item_fault_and_continues(monkeypatch):
     assert outcomes == ["error-skip", "imported"], (
         "the faulting item is contained as error-skip; the rest of the pass still completes"
     )
+
+
+# --------------------------------------------------------------------------- run_cycle drain model
+def _drain_app(conn, lock):
+    return type("App", (), {"state": type("St", (), {"db": conn, "detect_lock": lock})()})()
+
+
+def _patch_cycle_deps(monkeypatch, acquire_fn):
+    """Stub the heavy cycle deps so run_cycle exercises the REAL select_eligible -> drain -> apply
+    path against the seeded in-memory ledger, with no network/detection."""
+    monkeypatch.setattr(scheduler, "detect_gaps", lambda adapters, conn: {})
+    monkeypatch.setattr(scheduler, "build_adapters", lambda: ([FakeAdapter()], []))
+    monkeypatch.setattr(scheduler, "ensure_shares", lambda slskd, app_state: True)
+    import core.acquire as _acq
+    monkeypatch.setattr(_acq, "build_acquire_clients", lambda settings: (object(), []))
+    monkeypatch.setattr(scheduler, "acquire_item", acquire_fn)
+
+
+def test_run_cycle_drains_whole_backlog_not_a_capped_slice(monkeypatch):
+    """The drain model (owner UX 2026-06): one cycle works the ENTIRE eligible set, not MAX_CONCURRENT
+    * N. Seed 7 eligible items with a cap of 2 and assert all 7 are acquired in the one cycle and end
+    'stuck' (the search/match miss rests on the recheck cooldown — never exiled)."""
+    conn = _conn()
+    for i in range(7):
+        _seed_item(conn, i)  # 7 pending, all past grace (discovered 2020)
+    calls = {"n": 0}
+
+    def fake_acquire(item, adapter, slskd, conn_, settings):
+        calls["n"] += 1
+        return "stuck"
+
+    _patch_cycle_deps(monkeypatch, fake_acquire)
+    lock = threading.Lock()
+    scheduler.run_cycle(_drain_app(conn, lock), _settings(max_concurrent=2), lock=lock)
+
+    assert calls["n"] == 7, "every eligible item is drained in one cycle (no 30-item / cap*N ceiling)"
+    rows = conn.execute("SELECT status, next_attempt_at FROM items").fetchall()
+    assert all(r["status"] == "stuck" for r in rows)
+    assert all(r["next_attempt_at"] is not None for r in rows), "each rests on a recheck anchor"
+
+
+def test_run_cycle_drain_interrupts_on_should_stop(monkeypatch):
+    """A clean shutdown mid-drain: should_stop() True halts the drain between batches, so not every
+    item is processed (the daemon joins promptly instead of finishing a multi-hour backlog)."""
+    conn = _conn()
+    for i in range(10):
+        _seed_item(conn, i)
+    calls = {"n": 0}
+
+    def fake_acquire(item, adapter, slskd, conn_, settings):
+        calls["n"] += 1
+        return "stuck"
+
+    _patch_cycle_deps(monkeypatch, fake_acquire)
+    lock = threading.Lock()
+    # should_stop True from the very first check -> drain breaks before any batch runs.
+    scheduler.run_cycle(_drain_app(conn, lock), _settings(max_concurrent=2), lock=lock,
+                        should_stop=lambda: True)
+
+    assert calls["n"] == 0, "stop requested up-front -> no items dispatched"
 
 
 if __name__ == "__main__":
