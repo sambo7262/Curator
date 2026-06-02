@@ -55,6 +55,7 @@ def _config_from_settings() -> MatchConfig:
         strong_thresh=settings.match_strong_thresh,
         rec_gap_thresh=settings.match_rec_gap_thresh,
         same_album_thresh=settings.match_same_album_thresh,
+        max_track_ratio=settings.match_max_track_ratio,
     )
 
 

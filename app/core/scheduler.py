@@ -120,6 +120,11 @@ def apply_result(conn, lock: threading.Lock, item: GapItem, outcome: str, settin
       "partial"                        -> attempt_count reset to 0; next_attempt_at = now + partial
                                           cooldown; status 'partial' (progress, not a failure — revisit
                                           later for the missing tracks, never permanently-unavailable).
+      "already-present"                -> the completed download landed NO new tracks (already on disk /
+                                          nothing matched). Parked exactly like 'partial' (attempt reset,
+                                          partial cooldown, status 'partial' set by acquire) — re-grabbing
+                                          the same source can't help, so it rests on the cooldown rather
+                                          than quarantine->re-arm->re-download churn. Never exiled.
       "stuck"                          -> a search/match MISS (0 candidates, gate-declined, or found-
                                           but-undownloadable). NEVER exiled (owner policy 2026-06:
                                           never permanently ignore a gap). attempt_count += 1 (for
@@ -154,16 +159,16 @@ def apply_result(conn, lock: threading.Lock, item: GapItem, outcome: str, settin
             repo.record_attempt(conn, item.arr_app, item.arr_id, 0, None, "imported")
         return
 
-    if outcome == "partial":
-        # Partial album completion: real new tracks landed but the album is still incomplete. This is
-        # PROGRESS, not a failure — reset the attempt counter (never march a progressing item toward
-        # permanently-unavailable) and park it on the long partial cooldown so Curator revisits later
-        # for the missing tracks instead of re-downloading the same partial every cycle. acquire_item
-        # already set status='partial' on the same conn.
+    if outcome in ("partial", "already-present"):
+        # Partial album completion OR already-present (nothing new landed). Both are PROGRESS-or-no-op,
+        # NOT a failure — reset the attempt counter (never march toward permanently-unavailable) and
+        # park on the long partial cooldown so Curator revisits later WITHOUT re-downloading the same
+        # source every cycle. acquire_item already set status='partial' on the same conn for both.
         next_at = _iso(now + _dt.timedelta(seconds=settings.acq_partial_cooldown_seconds))
         with lock:
             repo.record_attempt(conn, item.arr_app, item.arr_id, 0, next_at, "partial")
-        log.info("%s: partial import -> revisit cooldown (next at %s)", _identity(item), next_at)
+        label = "partial import" if outcome == "partial" else "already present (not re-downloading)"
+        log.info("%s: %s -> revisit cooldown (next at %s)", _identity(item), label, next_at)
         return
 
     if outcome == "stuck":
@@ -311,6 +316,16 @@ def run_cycle(app, settings, first_pass: bool = False, lock: threading.Lock = No
                 for item, outcome in zip(batch, outcomes):
                     apply_result(conn, lock, item, outcome, settings)
                 done += len(batch)
+                # Deferred search cleanup (replaces the per-search delete that raced slskd's finalize):
+                # the batch's searches have all completed + finalized by now, so sweeping the COMPLETE
+                # ones here is a clean delete and keeps slskd's tracked-search set from accumulating
+                # across the drain. Best-effort (gc_searches never raises); a no-op on a test fake.
+                try:
+                    gc = getattr(slskd, "gc_searches", None)
+                    if callable(gc):
+                        gc()
+                except Exception as e:  # cleanup must never abort the drain
+                    log.debug("scheduler cycle: search GC skipped (%s)", e)
         finally:
             for c in slskd_clients:
                 c.close()

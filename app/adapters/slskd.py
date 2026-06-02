@@ -21,6 +21,7 @@
 # The injected httpx.Client makes the whole surface offline-provable with httpx.MockTransport /
 # respx (no live slskd) — see tests/test_slskd_client.py.
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -142,6 +143,7 @@ class SlskdClient:
         *,
         max_retries: int = 3,
         backoff_base: float = 0.5,
+        search_min_interval: float = 0.0,
     ):
         if not api_key:
             raise ValueError("SLSKD_API_KEY is required (slskd is the primary download path)")
@@ -150,6 +152,15 @@ class SlskdClient:
         self._headers = {"X-API-Key": api_key}   # slskd auth header: CAPITAL API (not Servarr's X-Api-Key)
         self._max_retries = max_retries
         self._backoff_base = backoff_base         # 0 in tests to skip the sleep
+        # Slow-burn search throttle (owner 2026-06: speed is NOT a requirement). A global min gap
+        # between search SUBMITs across ALL concurrent workers smooths the cycle-start CPU burst that
+        # both bursts 429s and starves slskd's gluetun status poll (the "VPN gone down" flap). The lock
+        # serializes only the brief gate (sleep + timestamp), NOT the HTTP call — workers still run
+        # their collection windows concurrently. 0 (the constructor default, and what tests use) disables
+        # it; production wires settings.slskd_search_min_interval_seconds via build_acquire_clients.
+        self._search_min_interval = search_min_interval
+        self._search_gate = threading.Lock()
+        self._last_search_at = 0.0                 # monotonic ts of the last submit (0 = never)
 
     def _send(self, method: str, url: str, *, retry: bool = True, retry_status=(), **kwargs):
         """Issue one slskd request, riding out the VPN-reconnect window with a bounded retry.
@@ -183,6 +194,19 @@ class SlskdClient:
         if self._backoff_base:
             time.sleep(self._backoff_base * (2 ** attempt))
 
+    def _throttle_search(self) -> None:
+        """Block until at least search_min_interval has elapsed since the last submit (global, across
+        threads). The gate lock is held across the sleep so two concurrent workers can't both pass at
+        once — each is paced behind the prior one — but the lock is released before the HTTP call so
+        the actual searches still overlap. A no-op when the interval is 0 (tests / disabled)."""
+        if self._search_min_interval <= 0:
+            return
+        with self._search_gate:
+            wait = self._search_min_interval - (time.monotonic() - self._last_search_at)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_search_at = time.monotonic()
+
     # --- search ---------------------------------------------------------------------------------
 
     def search(self, text: str) -> Optional[str]:
@@ -190,7 +214,12 @@ class SlskdClient:
 
         A response missing `id` yields None rather than a KeyError — the caller (04-04) treats a
         None search id as a failed submit and surfaces/retries it.
+
+        Throttled (slow-burn): before submitting, wait out any remaining slice of
+        search_min_interval since the last submit so concurrent workers never fire a herd of searches
+        at once (the cycle-start CPU spike behind the 429 bursts + the slskd↔gluetun poll-timeout flap).
         """
+        self._throttle_search()
         r = self._send(
             "POST",
             f"{self._base}/searches",
@@ -233,6 +262,40 @@ class SlskdClient:
         if r.status_code == 404:
             return  # already absent — nothing to clean up
         r.raise_for_status()
+
+    def gc_searches(self) -> int:
+        """Sweep slskd's tracked searches: DELETE every one slskd reports COMPLETE. Returns the count
+        deleted. Best-effort — never raises (a cleanup hiccup must never break the cycle).
+
+        This replaces the old delete-the-instant-responses-are-read cleanup (eb4540c), which raced
+        slskd's own search finalize: deleting a search while slskd was still writing its final state
+        row made slskd log `Failed to finalize search ... expected 1 row affected 0` on nearly every
+        search and could clip late responses. The scheduler now calls this BETWEEN batches instead —
+        by then every search in the just-finished batch has fully finalized, so the DELETE is clean and
+        the tracked set still never accumulates across the drain (the 409-on-duplicate guard the
+        original delete protected). An in-progress search (a later batch's, if any) is left alone."""
+        try:
+            r = self._send("GET", f"{self._base}/searches", timeout=30.0)
+            r.raise_for_status()
+            body = r.json()
+        except Exception as e:  # listing failed — skip this sweep, retry next batch (never raise)
+            log.debug("search GC list skipped (%s)", e)
+            return 0
+        if not isinstance(body, list):
+            return 0
+        deleted = 0
+        for s in body:
+            if not isinstance(s, dict) or not s.get("isComplete"):
+                continue
+            sid = s.get("id")
+            if not sid:
+                continue
+            try:
+                self.delete_search(sid)
+                deleted += 1
+            except Exception as e:  # one stuck delete must not abort the sweep
+                log.debug("search GC delete of %s skipped (%s)", sid, e)
+        return deleted
 
     def search_responses(self, search_id: str) -> list:
         """GET /searches/{id}/responses; return the list of per-peer response items.

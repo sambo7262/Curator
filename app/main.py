@@ -160,6 +160,34 @@ def detect():
         _detect_lock.release()
 
 
+@app.post("/reset")
+def reset():
+    """Manual full re-arm (owner ops): reset every stuck / quarantined / permanently-unavailable item
+    back to a clean `pending` retry slate — the same effect as a teardown+rebuild's boot re-arm, but
+    on demand from the status page (with a confirm dialog) so the owner can kick the whole backlog
+    back into search without redeploying.
+
+    Reuses repo.rearm_retryable (the exact DAO rearm_stuck_on_start calls on boot): status->pending,
+    attempt_count=0, next_attempt_at=NULL, so select_eligible re-picks them this cycle (subject only to
+    the grace window). 'partial'/'already-present' items are intentionally NOT touched — they rest on
+    their revisit cooldown exactly as a rebuild leaves them. Mirrors /detect's non-blocking writer-lock
+    pattern (D-16): a 409 if a detection/cycle is mid-write rather than racing the single connection.
+    """
+    from state import repo
+
+    conn = getattr(app.state, "db", None)
+    if conn is None:
+        raise HTTPException(status_code=503, detail="ledger connection not ready")
+
+    if not _detect_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="a write pass is in progress; try again shortly")
+    try:
+        n = repo.rearm_retryable(conn)
+    finally:
+        _detect_lock.release()
+    return {"status": "ok", "rearmed": n}
+
+
 def _row_view(row) -> dict:
     """Map a neutral ledger sqlite3.Row to the status-page view dict.
 

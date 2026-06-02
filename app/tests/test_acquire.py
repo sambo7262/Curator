@@ -383,10 +383,11 @@ def test_search_window_throttles_poll_via_hook(conn, settings):
     assert hook_calls["n"] >= 2, "poll_hook must throttle each not-yet-complete completeness poll"
 
 
-def test_collected_search_is_deleted_for_cleanup(conn, settings):
-    """REGRESSION (slskd 409 accumulation): after a search's responses are read, acquire must DELETE
-    that search so slskd does not retain it and 409 a later duplicate query. The fake records every
-    delete_search id; a single search -> exactly that search id is cleaned up."""
+def test_acquire_does_not_delete_search_inline(conn, settings):
+    """REGRESSION (slskd finalize race, 2026-06): acquire no longer deletes the search the instant
+    responses are read — that DELETE raced slskd's own finalize (`expected 1 row affected 0` on nearly
+    every search + clipped late responses). Cleanup is now deferred to the scheduler's between-batch
+    slskd.gc_searches() sweep, so acquire itself must NOT call delete_search."""
     item = _gap()
     _seed(conn, item)
     folder = "Radiohead - OK Computer (1997) [FLAC]"
@@ -398,9 +399,7 @@ def test_collected_search_is_deleted_for_cleanup(conn, settings):
         item, adapter, slskd, conn, settings, now=FakeClock(), gate_evaluate=_stub_gate({folder})
     )
     assert out == "imported"
-    # FakeSlskd.search returns 'sid-{n}'; exactly one search was submitted, so exactly that id is cleaned up.
-    assert slskd.deleted == ["sid-1"], "the submitted search must be cleaned up via delete_search"
-    assert len(slskd.deleted) == len(slskd.searches), "one delete_search per submitted search"
+    assert slskd.deleted == [], "acquire must NOT delete searches inline (deferred to scheduler GC)"
 
 
 # ====================================================================================================
@@ -596,27 +595,28 @@ def test_decline_then_relaxed_retry_then_stuck(conn, settings, caplog):
 # IMPORT-02/03/05: complete -> candidates (pre-filtered) -> empty => quarantine; non-empty => import
 # ====================================================================================================
 
-def test_empty_importable_subset_quarantines(conn, settings):
-    """If manual_import_candidates returns an EMPTY list (nothing importable), the staging dir is
-    quarantined and the item marked 'quarantined' (never blind-purged)."""
+def test_empty_importable_subset_parks_as_already_present(conn, settings):
+    """If manual_import_candidates returns an EMPTY list (nothing importable — with filterExistingFiles
+    that means the tracks are already on disk, the dominant single-inside-an-owned-album case), the item
+    PARKS as 'already-present' (status 'partial', staging purged) instead of quarantine->re-download
+    churn (owner 2026-06). No quarantine row is recorded."""
     item = _gap()
     _seed(conn, item)
     cand = _candidate(folder="Delta", username="seed")
     slskd = _FakeSlskdCandidates([cand], progress_script={"seed": [_P(1, "success")]}, complete_after=0)
     adapter = FakeAdapter(candidates_subset=[])   # nothing importable
 
-    # materialize the REAL slskd landing dir (A2: leaf of the remote folder) so the quarantine MOVE
-    # has something to move.
     staging = Path(settings.staging_root) / "Delta"
     staging.mkdir(parents=True, exist_ok=True)
 
     out = acquire.acquire_item(
         item, adapter, slskd, conn, settings, now=FakeClock(), gate_evaluate=_stub_gate({"Delta"})
     )
-    assert out == "quarantined"
-    assert get_gap(conn, "lidarr", "42")["status"] == "quarantined"
-    q = conn.execute("SELECT quarantine_path, failure_reason FROM staged_files").fetchone()
-    assert q["quarantine_path"] and q["failure_reason"]
+    assert out == "already-present"
+    assert get_gap(conn, "lidarr", "42")["status"] == "partial"
+    assert not staging.exists(), "an already-present download is purged, not moved to quarantine"
+    q = conn.execute("SELECT quarantine_path FROM staged_files").fetchone()
+    assert q is None or not q["quarantine_path"], "no quarantine row for an already-present park"
 
 
 def test_import_verify_purge_imported(conn, settings):
@@ -642,24 +642,26 @@ def test_import_verify_purge_imported(conn, settings):
     assert not staging.exists(), "verified import must purge the staging dir (D-05)"
 
 
-def test_verify_false_quarantines(conn, settings):
-    """execute_import runs but verify_imported is False (downloaded != imported) -> quarantine."""
+def test_verify_false_no_increase_parks_as_already_present(conn, settings):
+    """execute_import runs but verify is False AND no new track files landed (downloaded != imported,
+    track count unchanged) — the files are already on disk (DestinationAlreadyExists on a wanted single
+    that lives inside an album we own). Re-downloading the same source can't help, so it PARKS as
+    'already-present' (status 'partial', staging purged), NOT quarantine (owner 2026-06)."""
     item = _gap()
     _seed(conn, item)
     cand = _candidate(folder="Zeta", username="seed")
     slskd = _FakeSlskdCandidates([cand], progress_script={"seed": [_P(1, "success")]}, complete_after=0)
-    adapter = FakeAdapter(verify_result=False)
+    adapter = FakeAdapter(verify_result=False)   # track_counts default None -> 0,0 (no increase)
 
-    # A2: the staging dir is the remote-folder leaf ("Zeta").
     staging = Path(settings.staging_root) / "Zeta"
     staging.mkdir(parents=True, exist_ok=True)
 
     out = acquire.acquire_item(
         item, adapter, slskd, conn, settings, now=FakeClock(), gate_evaluate=_stub_gate({"Zeta"})
     )
-    assert out == "quarantined"
-    assert get_gap(conn, "lidarr", "42")["status"] == "quarantined"
-    assert staging.exists() is False, "staging was MOVED to quarantine, not left in place"
+    assert out == "already-present"
+    assert get_gap(conn, "lidarr", "42")["status"] == "partial"
+    assert staging.exists() is False, "an already-present download is purged (no junk left behind)"
 
 
 def test_partial_import_when_tracks_increase(conn, settings):
@@ -684,10 +686,10 @@ def test_partial_import_when_tracks_increase(conn, settings):
     assert not staging.exists(), "a partial import still purges staging (the matched files were moved out)"
 
 
-def test_partial_no_increase_still_quarantines(conn, settings):
+def test_partial_no_increase_parks_as_already_present(conn, settings):
     """The partial branch is gated on a REAL increase: verify False AND the track count did NOT move
-    (baseline 3 -> 3, e.g. Lidarr rejected every file) -> quarantine, exactly as before. No false
-    'partial' when nothing actually imported."""
+    (baseline 3 -> 3, e.g. every file already on disk) is NOT 'partial' — and (owner 2026-06) it is no
+    longer a quarantine either. It parks as 'already-present' (re-grabbing the same source can't help)."""
     item = _gap()
     _seed(conn, item)
     cand = _candidate(folder="Iota", username="seed")
@@ -700,8 +702,8 @@ def test_partial_no_increase_still_quarantines(conn, settings):
     out = acquire.acquire_item(
         item, adapter, slskd, conn, settings, now=FakeClock(), gate_evaluate=_stub_gate({"Iota"})
     )
-    assert out == "quarantined"
-    assert get_gap(conn, "lidarr", "42")["status"] == "quarantined"
+    assert out == "already-present"
+    assert get_gap(conn, "lidarr", "42")["status"] == "partial"
 
 
 def test_import_raise_quarantines(conn, settings):
@@ -764,8 +766,9 @@ def test_landing_dir_is_remote_folder_leaf(conn, settings):
 # ====================================================================================================
 
 def test_readarr_fault_isolates_music(conn, settings):
-    """A book whose import verify is False quarantines the BOOK; a separately-processed music item
-    completes 'imported'. Books never gate music."""
+    """A book whose import RAISES (a genuine *arr fault) quarantines the BOOK; a separately-processed
+    music item completes 'imported'. Books never gate music. (A book that merely landed nothing new now
+    parks as already-present like any item — see the already-present tests; only a hard fault quarantines.)"""
     book = _gap(arr_app="readarr", arr_id="7", kind="book")
     music = _gap(arr_app="lidarr", arr_id="9", kind="album")
     _seed(conn, book)
@@ -777,8 +780,8 @@ def test_readarr_fault_isolates_music(conn, settings):
     book_slskd = _FakeSlskdCandidates([book_cand], progress_script={"bseed": [_P(1, "success")]}, complete_after=0)
     music_slskd = _FakeSlskdCandidates([music_cand], progress_script={"mseed": [_P(1, "success")]}, complete_after=0)
 
-    # Readarr best-effort: verify False -> quarantine
-    book_adapter = FakeAdapter(app="readarr", verify_result=False)
+    # Readarr best-effort: a hard import fault (raise) -> quarantine for the book only.
+    book_adapter = FakeAdapter(app="readarr", import_raises=True)
     music_adapter = FakeAdapter(app="lidarr", verify_result=True)
 
     # A2: the book lands in the remote-folder leaf ("SomeBook").

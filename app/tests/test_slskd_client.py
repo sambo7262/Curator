@@ -287,6 +287,78 @@ def test_delete_search_other_error_surfaces():
         client.delete_search("s1")
 
 
+def test_gc_searches_deletes_only_completed(monkeypatch):
+    """gc_searches lists /searches and DELETEs ONLY the complete ones (the finalize-race fix, 2026-06):
+    an in-progress search is left alone, completed ones are swept. Returns the count deleted."""
+    recorder = []
+    listing = [
+        {"id": "done-1", "isComplete": True},
+        {"id": "running-2", "isComplete": False},
+        {"id": "done-3", "isComplete": True},
+    ]
+    client, _ = _client_for(
+        [
+            (lambda r: r.method == "GET" and r.url.path.endswith("/searches"),
+             lambda r: httpx.Response(200, json=listing)),
+            (lambda r: r.method == "DELETE", lambda r: httpx.Response(204)),
+        ],
+        recorder,
+    )
+    deleted = client.gc_searches()
+    assert deleted == 2
+    deleted_paths = [rec["path"] for rec in recorder if rec["method"] == "DELETE"]
+    assert any(p.endswith("/searches/done-1") for p in deleted_paths)
+    assert any(p.endswith("/searches/done-3") for p in deleted_paths)
+    assert not any(p.endswith("/searches/running-2") for p in deleted_paths)
+
+
+def test_gc_searches_never_raises_on_list_fault():
+    """A failed listing (e.g. 500 / VPN flap) must NOT raise — gc is best-effort cleanup; returns 0."""
+    client, _ = _client_for(
+        [(lambda r: r.method == "GET", lambda r: httpx.Response(500, json={"error": "down"}))],
+    )
+    assert client.gc_searches() == 0  # no exception
+
+
+def test_search_throttle_waits_min_interval(monkeypatch):
+    """With a non-zero search_min_interval, back-to-back search() submits are spaced: the second waits
+    out the remaining interval via a sleep. Drives a fake monotonic clock + records sleeps (no real wait)."""
+    import adapters.slskd as slskd_mod
+
+    recorder = []
+    base = _record_client([], [(lambda r: True, lambda r: httpx.Response(200, json={"id": "s1"}))])
+    client = SlskdClient("http://test-slskd", "secret-key", base, search_min_interval=2.0)
+
+    clock = {"t": 100.0}
+    sleeps = []
+    monkeypatch.setattr(slskd_mod.time, "monotonic", lambda: clock["t"])
+
+    def _fake_sleep(s):
+        sleeps.append(s)
+        clock["t"] += s  # advancing the clock mirrors real time passing during the sleep
+
+    monkeypatch.setattr(slskd_mod.time, "sleep", _fake_sleep)
+
+    client.search("first")    # first submit: last_search_at was 0 -> long-ago -> no wait
+    client.search("second")   # immediately after: must wait ~the full 2.0s interval
+    assert sleeps, "the second back-to-back submit must sleep to honor the min interval"
+    assert abs(sleeps[-1] - 2.0) < 0.01
+
+
+def test_search_throttle_disabled_when_interval_zero(monkeypatch):
+    """search_min_interval=0 (the default / test posture) never sleeps — the throttle is a no-op."""
+    import adapters.slskd as slskd_mod
+
+    base = _record_client([], [(lambda r: True, lambda r: httpx.Response(200, json={"id": "s1"}))])
+    client = SlskdClient("http://test-slskd", "secret-key", base)  # default interval 0.0
+
+    sleeps = []
+    monkeypatch.setattr(slskd_mod.time, "sleep", lambda s: sleeps.append(s))
+    client.search("a")
+    client.search("b")
+    assert sleeps == [], "no throttle sleep when the interval is 0"
+
+
 # --- A2: remote-folder-leaf landing-dir resolution (pinned live 2026-05-31) ---------------------
 
 def test_remote_folder_leaf_splits_on_backslash_and_slash():

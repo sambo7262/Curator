@@ -114,26 +114,20 @@ def _collect_candidates(slskd, query: str, settings, now, build_candidate, poll_
     log-flood / search-poll busy-loop bug). The hook runs only when the search is NOT yet complete, so
     a search that completes on the first poll (the common offline-test case) never calls it.
 
-    The slskd search is DELETED after its responses are read (best-effort, in finally): slskd retains
-    every search it tracks and rejects a duplicate query with 409 Conflict, so leaving them behind made
-    the next item — or the same stuck item next cycle — crash on re-search. Deleting our own search as
-    soon as we are done with it keeps slskd's tracked-search set from accumulating."""
+    The submitted search is NOT deleted here. slskd retains every tracked search and 409s a duplicate
+    query, so the search set must still be cleaned up — but deleting it the instant responses were read
+    RACED slskd's own finalize (it logged `Failed to finalize search ... expected 1 row affected 0` on
+    nearly every search and could clip late responses). Cleanup is now deferred to slskd.gc_searches(),
+    which the scheduler calls BETWEEN batches once every search in the batch has fully finalized."""
     search_id = slskd.search(query)
     if not search_id:
         return []
-    try:
-        deadline = now() + settings.acq_search_window_seconds
-        while now() < deadline:
-            if slskd.search_is_complete(search_id):
-                break
-            poll_hook()  # throttle: sleep acq_poll_seconds (prod) / advance the fake clock (tests)
-        responses = slskd.search_responses(search_id)
-    finally:
-        # Best-effort cleanup so slskd does not retain this search and 409 a later duplicate query.
-        try:
-            slskd.delete_search(search_id)
-        except Exception as e:  # cleanup must never break acquisition (and may be a no-op test fake)
-            log.debug("search %s cleanup skipped (%s)", search_id, e)
+    deadline = now() + settings.acq_search_window_seconds
+    while now() < deadline:
+        if slskd.search_is_complete(search_id):
+            break
+        poll_hook()  # throttle: sleep acq_poll_seconds (prod) / advance the fake clock (tests)
+    responses = slskd.search_responses(search_id)
     candidates = []
     for r in responses:
         cand = r if isinstance(r, Candidate) else build_candidate(r)
@@ -212,15 +206,34 @@ def _watch_to_completion(slskd, handle, settings, now, poll_hook) -> str:
 
 def _import_and_verify(item, adapter, staging_path_str, staged_id, conn, settings) -> str:
     """On a completed transfer: ask the adapter for the importable subset (already filtered), then
-    import + verify + purge / quarantine. Returns "imported" | "partial" | "quarantined".
+    import + verify + purge / quarantine / park. Returns "imported" | "partial" | "already-present"
+    | "quarantined".
 
-    Core consumes the adapter's list AS-IS (it never reads an *arr key): an empty list means nothing
-    importable -> quarantine; a non-empty list is passed straight to execute_import. A primary import
-    fault (raise) OR a False verify (downloaded != imported, D-03) quarantines the staging dir and
-    records the reason (D-06) — staging is NEVER blind-purged on failure. A best-effort (Readarr)
-    adapter already degrades its own faults to safe defaults, so a book fault lands here as an empty
-    subset / False verify and quarantines that book only (ARR-02)."""
+    Core consumes the adapter's list AS-IS (it never reads an *arr key). The outcomes:
+      * import lands and the album LEFT wanted          -> "imported" (purge staging)
+      * import lands SOME new track files               -> "partial"  (purge staging, revisit cooldown)
+      * nothing importable / NO new track files landed  -> "already-present" (owner 2026-06): the files
+            we grabbed are already on disk (the dominant churn — a wanted single only exists INSIDE an
+            album whose tracks Lidarr already has, so manualimport drops them all / DestinationAlready-
+            Exists blocks the move). Re-downloading the SAME source can never change this, so we PARK it
+            (purge staging, no quarantine) on the long partial cooldown rather than quarantine->re-arm->
+            re-download every cycle. It is never exiled — the cooldown re-checks later in case a fuller
+            source appears (faithful to "never permanently ignore a gap").
+      * execute_import RAISED (a genuine *arr fault)     -> "quarantined" (move staging aside + record)
+
+    A best-effort (Readarr) adapter degrades its own faults to safe defaults, so a book whose import
+    raises quarantines that book only (ARR-02); a book that lands nothing parks like any other item."""
     from core import staging
+
+    def _parked(reason: str) -> str:
+        # "Already present": the completed download landed no NEW tracks (already on disk / nothing
+        # matched). Not a failure and not retryable against this source — purge staging, mark 'partial'
+        # so the scheduler parks it on the revisit cooldown (reconcile won't re-arm it; select_eligible
+        # re-checks only after the cooldown). NO quarantine row, NO attempt burned toward exile.
+        _purge()
+        repo.set_status(conn, item.arr_app, item.arr_id, "partial")
+        log.info("%s: already present -> %s (parked, not re-downloading)", _identity(item), reason)
+        return "already-present"
 
     def _quarantine(reason: str) -> str:
         try:
@@ -246,7 +259,10 @@ def _import_and_verify(item, adapter, staging_path_str, staged_id, conn, setting
 
     decisions = adapter.manual_import_candidates(staging_path_str)
     if not decisions:
-        return _quarantine("no importable files in the completed download")
+        # Nothing importable: with filterExistingFiles the *arr drops files whose track it already has,
+        # so an all-dropped result is overwhelmingly "we already own these" (a single inside an album we
+        # have) — park it, don't quarantine + re-download forever.
+        return _parked("nothing importable (tracks already on disk or no track match)")
 
     # Partial-completion baseline (Phase 5): how many of this album's tracks the *arr already has on
     # disk BEFORE this import. A post-import increase = real tracks landed even if the album stays
@@ -259,10 +275,11 @@ def _import_and_verify(item, adapter, staging_path_str, staged_id, conn, setting
     except Exception as e:
         return _quarantine(f"manual import failed: {e}")
 
-    # Three-way verify (D-03 + partial album completion, owner policy 2026-05-31):
-    #   * album LEFT the wanted list            -> "imported" (fully satisfied)
-    #   * still wanted but track count INCREASED -> "partial"  (real tracks landed; revisit later for the rest)
-    #   * still wanted, no new track files       -> quarantine (the import genuinely did not land)
+    # Four-way verify (D-03 + partial album completion + already-present park, owner policy 2026-06):
+    #   * album LEFT the wanted list            -> "imported"        (fully satisfied)
+    #   * still wanted but track count INCREASED -> "partial"         (real tracks landed; revisit for the rest)
+    #   * still wanted, no new track files       -> "already-present" (we already own them / nothing matched;
+    #                                               re-downloading can't help -> PARK, do NOT quarantine)
     if adapter.verify_imported(item):
         _purge()
         repo.set_status(conn, item.arr_app, item.arr_id, "imported")
@@ -280,7 +297,10 @@ def _import_and_verify(item, adapter, staging_path_str, staged_id, conn, setting
                  _identity(item), after - baseline)
         return "partial"
 
-    return _quarantine("import not confirmed by re-query (no new track files landed)")
+    # Import executed but NO new track files landed — the files are already on disk (the wanted single
+    # lives inside an album we already have; DestinationAlreadyExists / all-dropped). Re-downloading the
+    # same source can never change this, so park it instead of quarantining + re-grabbing every cycle.
+    return _parked("import landed no new tracks (files already on disk)")
 
 
 def _cleanup_abandoned(item, slskd, handle, staging_path_str, settings) -> None:
@@ -337,7 +357,8 @@ def acquire_item(
     poll_hook: Optional[Callable[[], None]] = None,
 ) -> str:
     """Compose the single-item acquisition loop (the Phase-4 verdict). Returns a neutral outcome
-    string: "imported" | "partial" | "quarantined" | "stuck". Speaks ONLY neutral shapes (firewall holds).
+    string: "imported" | "partial" | "already-present" | "quarantined" | "stuck". Speaks ONLY neutral
+    shapes (firewall holds).
 
     Mirrors detect_gaps' single-composition-point shape (gap_detector 23-39). The clock + gate +
     candidate-builder + poll seams are injectable so the whole loop is offline-provable with fakes.
@@ -488,5 +509,10 @@ def build_acquire_clients(settings: Any):
     clients: List[Any] = []
     slskd_client = httpx.Client()
     clients.append(slskd_client)
-    slskd = SlskdClient(settings.slskd_url, settings.slskd_api_key, slskd_client)
+    slskd = SlskdClient(
+        settings.slskd_url,
+        settings.slskd_api_key,
+        slskd_client,
+        search_min_interval=getattr(settings, "slskd_search_min_interval_seconds", 0.0),
+    )
     return slskd, clients

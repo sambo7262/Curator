@@ -90,8 +90,39 @@ def render_status_html(snapshot: Dict[str, Any]) -> str:
         "<h1>Curator status</h1>"
         f"<p>Shares: {_e(shares_label)}</p>"
         f"<p>Imported in the last 24h: {_e(throughput)}</p>"
+        f"{_reset_control()}"
         f"<h2>Counts</h2><ul>{counts_cells}</ul>"
         "<h2>Items needing attention</h2>"
         f"{table}"
         "</body></html>"
+    )
+
+
+# The reset control: a single button that POSTs /reset after a confirm dialog, then reports how many
+# items were re-armed and reloads. STATIC developer-authored markup only — NO ledger/peer data is
+# interpolated into the handler, so there is no untrusted string to escape here (the T-05-20 escaping
+# rule governs interpolated ledger data; the issue table above still escapes every such value). The
+# attribute is double-quoted and the JS uses single quotes (the confirm text carries no quote chars),
+# so it needs no entity encoding. Same effect as a teardown+rebuild's boot re-arm, on demand (2026-06).
+_RESET_CONFIRM = (
+    "Re-arm ALL stuck, quarantined and permanently-unavailable items back to pending and "
+    "search them again? (Same as a teardown rebuild. Items already in progress or on a partial "
+    "revisit cooldown are left alone.)"
+)
+
+
+def _reset_control() -> str:
+    """The 'Reset & re-search' button + its inline confirm/POST/reload handler (static, no JS file)."""
+    onclick = (
+        f"if(confirm('{_RESET_CONFIRM}')){{"
+        "var b=this;b.disabled=true;"
+        "fetch('/reset',{method:'POST'})"
+        ".then(function(r){return r.json();})"
+        ".then(function(d){alert('Re-armed '+d.rearmed+' item(s) back to pending.');location.reload();})"
+        ".catch(function(e){alert('Reset failed: '+e);b.disabled=false;});"
+        "}"
+    )
+    return (
+        f"<p><button type=\"button\" onclick=\"{onclick}\">"
+        "Reset &amp; re-search stuck / quarantined items</button></p>"
     )

@@ -150,6 +150,44 @@ def test_render_status_html_pure_function_on_handbuilt_snapshot():
     assert "&lt;b&gt;z&lt;/b&gt;" in evil
 
 
+def test_status_page_renders_reset_button():
+    """The status page carries the manual reset button wired to POST /reset (owner 2026-06)."""
+    html = render_status_html(
+        {"counts": {}, "stuck": [], "quarantined": [], "permanently_unavailable": [],
+         "shares_ok": True, "throughput": 0}
+    )
+    assert "/reset" in html
+    assert "<button" in html
+    assert "confirm(" in html, "the reset button must guard with a confirm dialog"
+
+
+def test_reset_endpoint_rearms_stuck_and_quarantined(tmp_path, monkeypatch):
+    """POST /reset re-arms every stuck/quarantined/permanently-unavailable row back to pending with a
+    clean attempt slate (same as a teardown rebuild's boot re-arm), and reports the count. An imported
+    row is untouched."""
+    monkeypatch.setattr(
+        main, "settings", Settings(db_path=str(tmp_path / "reset.sqlite")), raising=True
+    )
+    with TestClient(main.app) as c:
+        conn = main.app.state.db
+        _seed_rows(conn)  # 1 stuck + 1 quarantined + 1 permanently-unavailable + 1 imported
+        # Give them a stale backoff so we can prove it is cleared.
+        conn.execute("UPDATE items SET attempt_count = 2, next_attempt_at = '2099-01-01T00:00:00Z'"
+                     " WHERE status != 'imported'")
+        conn.commit()
+
+        resp = c.post("/reset")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok", "rearmed": 3}
+
+        pend = conn.execute(
+            "SELECT COUNT(*) FROM items WHERE status='pending' AND attempt_count=0"
+            " AND next_attempt_at IS NULL"
+        ).fetchone()[0]
+        assert pend == 3, "all three re-armed to a clean pending slate"
+        assert conn.execute("SELECT status FROM items WHERE arr_id='13'").fetchone()[0] == "imported"
+
+
 # ---------------------------------------------------------------------------
 # Task 2 (05-05): a DISTINCT lifecycle test — startup wires the scheduler + shares_ok and reconcile,
 # shutdown stops the scheduler cleanly, WITHOUT a live acquisition cycle firing.

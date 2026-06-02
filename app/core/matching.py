@@ -51,6 +51,11 @@ class MatchConfig:
     #                                  spelling variants of the SAME album fold under it and are treated
     #                                  as same-release copies (the selector picks the source), not
     #                                  ambiguity — exact-key equality false-declined them live (2026-06).
+    max_track_ratio: float = 1.5     # hard oversize guard: a candidate with MORE than this multiple of
+    #                                  the manifest's track count is declined outright (a 40-track deluxe
+    #                                  BOX is not the ~10-track album the gap wants, even when the names
+    #                                  match perfectly — the weighted average alone lets it slip under
+    #                                  strong_thresh). 0 disables. Live 2026-06: Queen 'The Miracle' box.
 
 
 def _norm(s: Optional[str]) -> str:
@@ -157,6 +162,21 @@ def score(
     penalties: List[float] = []
     weights: List[float] = []
     reasons: List[str] = []
+
+    # Hard oversize guard (precision over recall): a candidate carrying FAR more audio files than the
+    # manifest declares is a deluxe/box-set edition, NOT the album the gap wants — decline it outright
+    # (distance 1.0) BEFORE the weighted average can dilute the track-count penalty under strong_thresh
+    # when the artist/album names happen to match perfectly. Skipped when the manifest has no track
+    # count (track_count <= 0, e.g. a book) or the guard is disabled (max_track_ratio <= 0).
+    if (
+        cfg.max_track_ratio > 0
+        and manifest.track_count > 0
+        and candidate.audio_file_count > manifest.track_count * cfg.max_track_ratio
+    ):
+        return 1.0, [
+            f"DECLINE oversized: {candidate.audio_file_count} files vs {manifest.track_count}-track "
+            f"album (> {cfg.max_track_ratio:.2f}x — deluxe/box-set guard)"
+        ]
 
     da = _str_distance(candidate.parsed_artist, manifest.artist)
     penalties.append(da)

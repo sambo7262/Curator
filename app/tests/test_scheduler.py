@@ -232,6 +232,23 @@ def test_apply_result_partial_parks_on_cooldown_no_burn():
     assert row["next_attempt_at"] is not None, "the revisit cooldown anchor must be set"
 
 
+def test_apply_result_already_present_parks_like_partial_no_burn():
+    """An 'already-present' outcome (download landed nothing new — files already on disk) parks exactly
+    like 'partial': attempt_count resets to 0 (NOT burned toward exile) and next_attempt_at is stamped
+    with the long revisit cooldown, so Curator never re-downloads the same already-owned source every
+    cycle (owner 2026-06 — the DestinationAlreadyExists churn fix)."""
+    conn = _conn()
+    _seed_item(conn, 1, status="partial", attempt_count=2)  # acquire_item already set status='partial'
+    lock = threading.Lock()
+    scheduler.apply_result(conn, lock, _item(arr_id="1"), "already-present", _settings())
+    row = conn.execute(
+        "SELECT status, attempt_count, next_attempt_at FROM items WHERE arr_id='1'"
+    ).fetchone()
+    assert row["status"] == "partial"
+    assert row["attempt_count"] == 0, "already-present must NOT burn an attempt"
+    assert row["next_attempt_at"] is not None, "parked on the revisit cooldown"
+
+
 def test_apply_result_stuck_rests_on_recheck_no_burn_toward_exile():
     """A 'stuck' outcome (search/match MISS) rests on the recheck cooldown and stays 'stuck' — it
     bumps attempt_count for observability but is NEVER marched toward permanently-unavailable."""
@@ -411,6 +428,37 @@ def test_run_cycle_drain_interrupts_on_should_stop(monkeypatch):
                         should_stop=lambda: True)
 
     assert calls["n"] == 0, "stop requested up-front -> no items dispatched"
+
+
+def test_run_cycle_gc_searches_between_batches(monkeypatch):
+    """The finalize-race fix (2026-06): the cycle calls slskd.gc_searches() AFTER each drained batch
+    (cleanup deferred out of acquire), so slskd's tracked-search set never accumulates across the drain
+    yet each delete happens only once the batch's searches have finalized. 5 items, cap 2 -> 3 batches
+    -> 3 GC sweeps."""
+    conn = _conn()
+    for i in range(5):
+        _seed_item(conn, i)
+
+    class _GcSlskd:
+        def __init__(self):
+            self.gc_calls = 0
+
+        def gc_searches(self):
+            self.gc_calls += 1
+            return 0
+
+    gc_slskd = _GcSlskd()
+
+    def fake_acquire(item, adapter, slskd, conn_, settings):
+        return "stuck"
+
+    _patch_cycle_deps(monkeypatch, fake_acquire)
+    import core.acquire as _acq
+    monkeypatch.setattr(_acq, "build_acquire_clients", lambda settings: (gc_slskd, []))
+    lock = threading.Lock()
+    scheduler.run_cycle(_drain_app(conn, lock), _settings(max_concurrent=2), lock=lock)
+
+    assert gc_slskd.gc_calls == 3, "one search-GC sweep per drained batch (5 items / cap 2 = 3 batches)"
 
 
 if __name__ == "__main__":

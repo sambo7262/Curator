@@ -266,6 +266,36 @@ def test_recommend_same_album_token_variant_accepts():
     assert chosen is a
 
 
+def test_score_oversized_release_declines_even_when_names_match():
+    """Hard oversize guard (live 2026-06, Queen 'The Miracle' box): a candidate with FAR more audio
+    files than the manifest declares (40 vs 10, a 4-disc deluxe box) is forced to distance 1.0 — a
+    DECLINE — even though the artist + album names match perfectly. Without the guard the weighted
+    average would dilute the maxed track-count penalty and slip the box under strong_thresh."""
+    man = Manifest(artist="Queen", album="The Miracle", track_count=10, track_titles=None, kind="album")
+    box = build_candidate({
+        "folder": "Queen - The Miracle [FLAC]",
+        "files": [{"filename": f"{i:02d} - Track.flac"} for i in range(40)],
+    })
+    dist, reasons = score(box, man)
+    assert dist == 1.0
+    assert any("oversized" in r.lower() for r in reasons)
+    decision, chosen, _, _ = recommend([(dist, box, reasons)])
+    assert decision == "decline"
+
+
+def test_score_right_sized_release_not_tripped_by_oversize_guard():
+    """The guard does NOT fire at the boundary: a candidate within max_track_ratio (e.g. 12 vs 10, a
+    normal edition with a couple of bonus tracks) is scored normally, not force-declined."""
+    man = Manifest(artist="Queen", album="The Miracle", track_count=10, track_titles=None, kind="album")
+    ok = build_candidate({
+        "folder": "Queen - The Miracle [FLAC]",
+        "files": [{"filename": f"{i:02d} - Track.flac"} for i in range(12)],  # 12 <= 10 * 1.5
+    })
+    dist, reasons = score(ok, man)
+    assert dist < 1.0
+    assert not any("oversized" in r.lower() for r in reasons)
+
+
 def test_borderline_accept_just_inside_strong(load_fixture):
     """borderline_accept (minor album-name noise 'OK Comp') lands just inside strong -> accept."""
     cand = _candidate(load_fixture, "borderline_accept")
